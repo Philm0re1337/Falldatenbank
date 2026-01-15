@@ -18,12 +18,18 @@ DB_NAME = "fall_archiv_cloud.db"
 @st.cache_resource
 def get_gdrive_service():
     try:
-        # Wir bauen das Dictionary manuell aus den flachen Secrets zusammen
+        # Den Key aus den Secrets holen
+        private_key = st.secrets["GCP_PRIVATE_KEY"]
+        
+        # Sicherstellen, dass der Key für Google Drive richtig formatiert ist
+        # Wir entfernen alle doppelten Backslashes und sorgen für echte Umbrüche
+        formatted_key = private_key.replace("\\n", "\n").strip()
+
         creds_info = {
             "type": st.secrets["GCP_TYPE"],
             "project_id": st.secrets["GCP_PROJECT_ID"],
             "private_key_id": st.secrets["GCP_PRIVATE_KEY_ID"],
-            "private_key": st.secrets["GCP_PRIVATE_KEY"].replace("\\n", "\n"),
+            "private_key": formatted_key,
             "client_email": st.secrets["GCP_CLIENT_EMAIL"],
             "client_id": st.secrets["GCP_CLIENT_ID"],
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
@@ -37,12 +43,13 @@ def get_gdrive_service():
             scopes=['https://www.googleapis.com/auth/drive']
         )
         
+        # Kleiner Zeit-Puffer
         creds._iat = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=30)
+        
         return build('drive', 'v3', credentials=creds)
     except Exception as e:
         st.error(f"❌ Verbindungsfehler: {e}")
         return None
-
 # Globale Instanz erstellen
 drive_service = get_gdrive_service()
 
@@ -179,4 +186,5 @@ elif mode == "Verwalten":
             conn.commit()
             st.success(f"Fall {target} wurde gelöscht.")
             st.rerun()
+
 
