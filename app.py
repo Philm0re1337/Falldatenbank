@@ -17,23 +17,33 @@ DB_NAME = "fall_archiv_cloud.db"
 @st.cache_resource
 def get_gdrive_service():
     try:
-        # Daten direkt aus Secrets ziehen
+        # 1. Daten aus Secrets laden
         creds_info = dict(st.secrets["gcp_service_account"])
         
-        # Erstelle Credentials
+        # 2. Fehlerkorrektur: Alle IDs von versteckten Leerzeichen befreien
+        # Das löst den "number of data characters cannot be 1 more than a multiple of 4" Fehler
+        for key in ["project_id", "private_key_id", "client_id", "client_email"]:
+            if key in creds_info:
+                creds_info[key] = str(creds_info[key]).strip()
+
+        # 3. Private Key säubern (entfernt versehentliche Leerzeichen am Anfang/Ende)
+        if "private_key" in creds_info:
+            creds_info["private_key"] = creds_info["private_key"].strip()
+
+        # 4. Credentials erstellen
         creds = service_account.Credentials.from_service_account_info(
             creds_info, 
             scopes=['https://www.googleapis.com/auth/drive']
         )
         
-        # Kleiner Zeitpuffer
+        # Zeit-Fix für Google Server
         creds._iat = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=30)
         
         return build('drive', 'v3', credentials=creds)
     except Exception as e:
         st.error(f"❌ Verbindungsfehler: {e}")
         return None
-drive_service = get_gdrive_service()
+
 
 # --- DATENBANK SETUP ---
 def get_db_connection():
@@ -166,5 +176,6 @@ elif mode == "Verwalten":
             conn.commit()
             st.success("Daten wurden gelöscht.")
             st.rerun()
+
 
 
