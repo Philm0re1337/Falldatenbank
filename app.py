@@ -17,31 +17,22 @@ DB_NAME = "fall_archiv_cloud.db"
 @st.cache_resource
 def get_gdrive_service():
     try:
-        # Laden der Anmeldedaten
-        creds_dict = dict(st.secrets["gcp_service_account"])
+        # Daten direkt aus Secrets ziehen
+        creds_info = dict(st.secrets["gcp_service_account"])
         
-        # Zeilenumbrüche fixen
-        private_key = creds_dict["private_key"].replace("\\n", "\n")
-        
-        # --- PADDING FIX START ---
-        # Entferne Leerzeichen und prüfe die Länge für Base64-Konformität
-        private_key = private_key.strip()
-        # Nur der Teil zwischen den BEGIN/END Markern braucht korrektes Padding,
-        # aber from_service_account_info regelt das meist intern, wenn der String sauber ist.
-        creds_dict["private_key"] = private_key
-        # --- PADDING FIX END ---
-        
+        # Erstelle Credentials
         creds = service_account.Credentials.from_service_account_info(
-            creds_dict, 
+            creds_info, 
             scopes=['https://www.googleapis.com/auth/drive']
         )
         
+        # Kleiner Zeitpuffer
         creds._iat = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=30)
+        
         return build('drive', 'v3', credentials=creds)
     except Exception as e:
-        st.error(f"❌ Verbindungsfehler zu Google Drive: {e}")
+        st.error(f"❌ Verbindungsfehler: {e}")
         return None
-
 drive_service = get_gdrive_service()
 
 # --- DATENBANK SETUP ---
@@ -175,4 +166,5 @@ elif mode == "Verwalten":
             conn.commit()
             st.success("Daten wurden gelöscht.")
             st.rerun()
+
 
