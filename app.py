@@ -3,7 +3,8 @@ import pandas as pd
 import sqlite3
 import os
 import io
-from datetime import datetime
+import base64
+import datetime
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
@@ -11,36 +12,44 @@ from googleapiclient.http import MediaIoBaseUpload
 # --- KONFIGURATION ---
 GDRIVE_FOLDER_ID = "0B5UeXbdEo09pR1h2T0pJNmdLMUE" 
 TEAM_PASSWORD = "2180"
-DB_NAME = "fall_archiv_gdrive.db"
+DB_NAME = "fall_archiv_cloud.db"
 
-# --- GOOGLE DRIVE VERBINDUNG ÜBER SECRETS ---
-@st.cache_resource
+# Dein Private Key als Base64 (sicher gegen Formatierungsfehler)
+B64_KEY = "LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JSUV2QUlCQURBTkJna3Foa2lHOXcwQkFRRUZBQVNDQktZd2dnU2lBZ0VBQW9JQkFRRFlld1BRSXNNYUFSZUMKWDJwRHpQblhEbklycktLUnFhK0ZhckNGZFpSWEVUanFHOWFlSXNCSzl2OEF0aCtZR2dmNkpvVW1VRVdvdjFsCm5LVG54U1B3Rm5yRVN5MG9Cdy9LVk1lWmhkTjdlcWJNaGcwM3RzU2x2TDZ3TmxVazhKaGVKVE81Y29qQ3FvSFcKSTZwZTZrZTVYdkdwaUE2emp3bUgvekU4Smttb0lGY2VoMXFma0VONSVwVjdYNjRrNUM2aDRxcEY5Y2FqQUhWMgpiYWVaWGlGek1jUFAxRXM0cFBuL0xTK2NJdzFoMkZxcTg5c2RlYjB5MFppVTExeHdUUm1lazVVTG1kR1lrUWx4Ckt2WXYwdWdleDk1ZkplcXRHS1g4VGk5VnE2cU9UT0VqcXVXZWFrZDQ4bzNNV1c0dUNHT09nZFpaWkVJcXdHY20KeUpaaVdKR1pBZ01CQUFFQ2dnRUFIOE9BOTVrd3R3cjhUdDFYbUUrcW54cjVKUnlRR3RTS2txTHppVGlzVVVsSgpOeldkaXEwdDhhNmhEZVRUazhyS0Y4SEV6U2hsMnlOWW9ndUp1Rm9LWlFVUmp6bThIU3orVzl2VURsQVE3VjZNaQpIK2VpcEdjbG4reHhPU3REcittcTl5MThQUWtJaEZ6cnEycWNncEUraU5EZnhHMkNhb3RIOHhTaFNPaDJvT2ZPCkxvc0Q0NmlMYlNQcUt2VFoybVBIcXhBSTN0WGtTOVRES3JVNDA1Q3ZkcXNCL0FCTkovcmd4bjVUa3pleG02dSsKTHVZMGY1SEZUMjYrUSswQ2FIK0J0Y25CQ05kL2psWW1CQkkrZ2ljOGVPRUZRQzZSc0NWTm5uOGNSam45MlVsawpIMFB0UTRBN2FkaUZaVitOY2lZcWxlM1ZPSjlKS1FXOVFmTW8yZU1HSlFLQmdRRDVZwFBNMkt4eDJ1VG1aWUR6CllmTllFTVR1UURmaGF0OXlyY1Zhb3NNdDBTekl6akR2UU13T2M3NTE3ZmRLcFVWZWVxZnA0bmNzQ0xa bFgzTGpZb3d2S3h3U2E3VTUzcXQ3c1Ztb041eEkwdTJoemx3K2YzWktsa0VlUkhtOWVjL2J1aU1vZjE5Q0lsWHRMnhhCkRZV01GajE1c3VNYmJIdHYrSVVrM3YwSEJRS0JnUURlT1FDMlRDUG0yZXdZUmhzQko1Q3BiZi9nRVV0V3lLbFkKeDRuTUdvdmdkQTVia0o4QlZDRDd0R2NTcEFjSFhucHA4aWU3ODVJL3R3MGt1RmFRUWxGNUlQYnJEVTJGOVpIclFFSm5pRWtoT1dCRXRRakZabEx2cmNXVXhUODVCQUt0cEdSMUZQYkpzeW8vZmVDQmlEYWVWdTg2VGtsdUNpQgp3OEEvR1AvOGhRS0JnR1RlcG9HWXNrZHJEbUxTYzVIOThIdVNiTlVoVEhqMHpXU0pQT1lvSjJJRTFXUnpZZitqCjZlVisayjhIelozdHRNOE1XYThudzlFaHVJQjlXcGJsYno3QVhSNW1TbXNaMGFxNlZWVmhDT203eHpwSFNiQgpOeGY3cnA3dmlYb3VlWXVDeExUOVlKYU9PVjh0V01pajUzK0VtZURIN0ViOCtHYVYrQk9BWEh4QW9HQUZiTDAKQWpHMWN4QUtRWjNJejVnaWZLcjAzUUVkZTF rYlF3SHZMa0haajJQVzBDRGtGMFJ5ZitjUG5kMXBqYTdXNitLSQpUSWFuMUdYZ1VHam5GTFFWTEpwb3pnRUhIL0lSNVg3VXNmTElwWEtjS0VRUjZnVGF2RE9yOE8rdEFYOFBJbmFqCngxWnZTNkZpUjBYbzVFeG5jMFg1dEROaFFaa1dqZjZPN2U3QzFMVUNnWUJ5Z1YyaUtzc2xDdFZpRlR6dE5oeHYKeUxGVDk1ak5sRVNEblVSMTJvSThkNkQwcmk1V3p0bjkrRDM1eUlLZWc0c1YvT3lXcXl3Y1lkNmFPT0FwOWlUMGsKbFNWZTkyY01FWFNpNVd0ZGk2RERoWHBoVWFPZGtGaWF2Z2R2a0lOclBnUTJFQXFNR1FzcG9QdXY3UENUWFhPCkRXT09SaWluTytLTmxWc0xvRGRUaFE9PQotLS0tLUVORCBQUklWQVRFIEtFWS0tLS0tCg=="
+
+# --- GOOGLE DRIVE VERBINDUNG ---
 @st.cache_resource
 def get_gdrive_service():
     try:
-        # Wir laden die Secrets in ein Dictionary
-        creds_dict = {
-            "type": st.secrets["gcp_service_account"]["type"],
-            "project_id": st.secrets["gcp_service_account"]["project_id"],
-            "private_key_id": st.secrets["gcp_service_account"]["private_key_id"],
-            # Hier ist die wichtige Reparatur:
-            "private_key": st.secrets["gcp_service_account"]["private_key"].replace("\\n", "\n"),
-            "client_email": st.secrets["gcp_service_account"]["client_email"],
-            "client_id": st.secrets["gcp_service_account"]["client_id"],
-            "auth_uri": st.secrets["gcp_service_account"]["auth_uri"],
-            "token_uri": st.secrets["gcp_service_account"]["token_uri"],
-            "auth_provider_x509_cert_url": st.secrets["gcp_service_account"]["auth_provider_x509_cert_url"],
-            "client_x509_cert_url": st.secrets["gcp_service_account"]["client_x509_cert_url"],
+        # Key aus Base64 dekodieren
+        decoded_key = base64.b64decode(B64_KEY).decode('utf-8')
+        
+        # Credential-Info direkt im Code
+        creds_info = {
+            "type": "service_account",
+            "project_id": "falldatenbank",
+            "private_key_id": "eb9219c2f4b417433e68d54baa8ed80c759169a5",
+            "private_key": decoded_key,
+            "client_email": "falldatenbank@falldatenbank.iam.gserviceaccount.com",
+            "client_id": "102942440306105394865",
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/falldatenbank%40falldatenbank.iam.gserviceaccount.com"
         }
         
         creds = service_account.Credentials.from_service_account_info(
-            creds_dict, 
+            creds_info, 
             scopes=['https://www.googleapis.com/auth/drive']
         )
+        
+        # ZEIT-FIX: Verhindert 'invalid_grant' durch Serverzeit-Unterschiede
+        creds._iat = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=20)
+        
         service = build('drive', 'v3', credentials=creds)
         return service
     except Exception as e:
-        st.error(f"❌ Fehler bei der Google Verbindung: {e}")
+        st.error(f"❌ Kritischer Verbindungsfehler: {e}")
         return None
 
 drive_service = get_gdrive_service()
@@ -63,146 +72,103 @@ conn.commit()
 def upload_to_gdrive(file, filename):
     try:
         file_metadata = {'name': filename, 'parents': [GDRIVE_FOLDER_ID]}
-        
-        # Sicherstellen, dass der Stream am Anfang steht
         file.seek(0)
         fh = io.BytesIO(file.read())
         media = MediaIoBaseUpload(fh, mimetype='application/octet-stream', resumable=True)
         
-        # Erstellen der Datei in Google Drive
         gfile = drive_service.files().create(
             body=file_metadata,
             media_body=media,
             fields='id'
         ).execute()
         
-        file_id = gfile.get('id')
-        
-        # Berechtigung: Jeder mit Link kann lesen (für die Anzeige in der App)
-        drive_service.permissions().create(
-            fileId=file_id,
-            body={'type': 'anyone', 'role': 'reader'}
-        ).execute()
-        
-        return file_id
+        f_id = gfile.get('id')
+        drive_service.permissions().create(fileId=f_id, body={'type': 'anyone', 'role': 'reader'}).execute()
+        return f_id
     except Exception as e:
-        st.error(f"❗ Upload-Fehler für {filename}: {e}")
+        st.error(f"❗ Upload-Fehler ({filename}): {e}")
         return None
 
-# --- LOGIN ---
-if "password_correct" not in st.session_state:
-    st.title("🔒 Team-Login")
-    pw = st.text_input("Bitte gib das Passwort ein", type="password")
+# --- AUTHENTIFIZIERUNG ---
+if "auth" not in st.session_state:
+    st.title("🔒 Team Login")
+    pwd = st.text_input("Passwort eingeben", type="password")
     if st.button("Anmelden"):
-        if pw == TEAM_PASSWORD:
-            st.session_state["password_correct"] = True
+        if pwd == TEAM_PASSWORD:
+            st.session_state["auth"] = True
             st.rerun()
         else:
-            st.error("Falsches Passwort.")
+            st.error("Falsches Passwort")
     st.stop()
 
-# --- UI & NAVIGATION ---
-st.set_page_config(page_title="Cloud Fall-Archiv", layout="wide")
-st.sidebar.title("📁 Navigation")
-choice = st.sidebar.radio("Menü", ["Übersicht & Suche", "Neuanlage", "Bearbeiten & Löschen"])
+# --- UI ---
+st.set_page_config(page_title="Team Cloud Archiv", layout="wide")
+st.sidebar.title("Menü")
+mode = st.sidebar.radio("Navigation", ["Übersicht", "Neuanlage", "Verwalten"])
 
 # --- NEUANLAGE ---
-if choice == "Neuanlage":
-    st.header("➕ Neuen Fall erfassen")
-    with st.form("neu_form", clear_on_submit=True):
-        f_nr = st.text_input("Fall-Nummer")
-        f_date = st.date_input("Datum", datetime.now())
-        f_desc = st.text_area("Beschreibung")
-        u_bilder = st.file_uploader("Bilder (Erstes = Vorschau)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+if mode == "Neuanlage":
+    st.header("➕ Neuen Fall anlegen")
+    with st.form("neu", clear_on_submit=True):
+        fnr = st.text_input("Fall-Nummer")
+        fdat = st.date_input("Datum", datetime.date.today())
+        fbes = st.text_area("Beschreibung")
+        u_imgs = st.file_uploader("Bilder", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
         u_vids = st.file_uploader("Videos", type=["mp4", "mov"], accept_multiple_files=True)
         
-        if st.form_submit_button("In Google Drive speichern"):
-            if f_nr and u_bilder and drive_service:
-                with st.spinner('Upload läuft...'):
-                    # 1. Hauptbild hochladen
-                    h_id = upload_to_gdrive(u_bilder[0], f"{f_nr}_VORSCHAU.jpg")
-                    
-                    c.execute("INSERT INTO falle (fall_nummer, datum, beschreibung, hauptbild_id, erledigt) VALUES (?,?,?,?,0)",
-                              (f_nr, f_date, f_desc, h_id))
-                    f_id = c.lastrowid
-                    
-                    # 2. Alle Bilder hochladen
-                    for img in u_bilder:
-                        img_id = upload_to_gdrive(img, f"{f_nr}_BILD_{img.name}")
-                        c.execute("INSERT INTO media (fall_id, file_id, file_type) VALUES (?,?,'image')", (f_id, img_id))
-                    
-                    # 3. Videos hochladen
+        if st.form_submit_button("Speichern"):
+            if fnr and u_imgs and drive_service:
+                with st.spinner("Hochladen..."):
+                    hid = upload_to_gdrive(u_imgs[0], f"{fnr}_MAIN.jpg")
+                    c.execute("INSERT INTO falle (fall_nummer, datum, beschreibung, hauptbild_id) VALUES (?,?,?,?)",
+                              (fnr, fdat, fbes, hid))
+                    last_id = c.lastrowid
+                    for img in u_imgs:
+                        mid = upload_to_gdrive(img, f"{fnr}_IMG_{img.name}")
+                        c.execute("INSERT INTO media (fall_id, file_id, file_type) VALUES (?,?,'image')", (last_id, mid))
                     if u_vids:
                         for vid in u_vids:
-                            vid_id = upload_to_gdrive(vid, f"{f_nr}_VIDEO_{vid.name}")
-                            c.execute("INSERT INTO media (fall_id, file_id, file_type) VALUES (?,?,'video')", (f_id, vid_id))
-                    
+                            vid_id = upload_to_gdrive(vid, f"{fnr}_VID_{vid.name}")
+                            c.execute("INSERT INTO media (fall_id, file_id, file_type) VALUES (?,?,'video')", (last_id, vid_id))
                     conn.commit()
-                    st.success(f"Fall {f_nr} wurde erfolgreich gespeichert!")
+                    st.success("Erfolgreich gespeichert!")
 
-# --- ÜBERSICHT & SUCHE ---
-elif choice == "Übersicht & Suche":
-    st.header("📂 Archiv")
-    s1, s2, s3 = st.columns([2,1,1])
-    search_nr = s1.text_input("Suche Nummer")
-    search_date = s2.date_input("Datum filtern", value=None)
-    status_f = s3.selectbox("Status", ["Alle", "Offen", "Erledigt"])
-
-    query = "SELECT * FROM falle WHERE 1=1"
-    params = []
-    if search_nr:
-        query += " AND fall_nummer LIKE ?"; params.append(f"%{search_nr}%")
-    if search_date:
-        query += " AND datum = ?"; params.append(search_date)
-    if status_f == "Offen": query += " AND erledigt = 0"
-    elif status_f == "Erledigt": query += " AND erledigt = 1"
-
-    df = pd.read_sql_query(query + " ORDER BY datum DESC", conn, params=params)
-
+# --- ÜBERSICHT ---
+elif mode == "Übersicht":
+    st.header("📂 Archiv Übersicht")
+    df = pd.read_sql_query("SELECT * FROM falle ORDER BY datum DESC", conn)
     for _, row in df.iterrows():
-        badge = "✅" if row['erledigt'] == 1 else "⏳"
         with st.container(border=True):
-            col_img, col_txt = st.columns([1, 4])
-            col_img.image(f"https://drive.google.com/uc?id={row['hauptbild_id']}")
-            with col_txt:
-                st.subheader(f"{badge} Fall {row['fall_nummer']}")
-                st.caption(f"Datum: {row['datum']}")
-                with st.expander("Ansehen"):
-                    st.write(row['beschreibung'])
+            c1, c2 = st.columns([1, 4])
+            c1.image(f"https://drive.google.com/uc?id={row['hauptbild_id']}")
+            with c2:
+                st.subheader(f"Fall {row['fall_nummer']}")
+                st.write(row['beschreibung'])
+                with st.expander("Medien anzeigen"):
                     m_df = pd.read_sql_query(f"SELECT * FROM media WHERE fall_id = {row['id']}", conn)
-                    m_cols = st.columns(3)
+                    cols = st.columns(3)
                     for i, m_row in m_df.iterrows():
                         url = f"https://drive.google.com/uc?id={m_row['file_id']}"
-                        with m_cols[i % 3]:
+                        with cols[i % 3]:
                             if m_row['file_type'] == "video": st.video(url)
                             else: st.image(url)
 
-# --- BEARBEITEN & LÖSCHEN ---
-elif choice == "Bearbeiten & Löschen":
-    st.header("📝 Verwalten")
+# --- VERWALTEN ---
+elif mode == "Verwalten":
+    st.header("📝 Fälle bearbeiten / löschen")
     df = pd.read_sql_query("SELECT * FROM falle", conn)
     if not df.empty:
-        auswahl = st.selectbox("Fall wählen", df['fall_nummer'].tolist())
-        f_data = df[df['fall_nummer'] == auswahl].iloc[0]
-        f_id = int(f_data['id'])
-        
+        target = st.selectbox("Fall wählen", df['fall_nummer'].tolist())
+        sel = df[df['fall_nummer'] == target].iloc[0]
         with st.form("edit"):
-            u_nr = st.text_input("Nummer", value=f_data['fall_nummer'])
-            u_date = st.date_input("Datum", value=datetime.strptime(str(f_data['datum']), '%Y-%m-%d'))
-            u_desc = st.text_area("Beschreibung", value=f_data['beschreibung'])
-            u_done = st.checkbox("Erledigt", value=bool(f_data['erledigt']))
-            if st.form_submit_button("Speichern"):
-                c.execute("UPDATE falle SET fall_nummer=?, datum=?, beschreibung=?, erledigt=? WHERE id=?", 
-                          (u_nr, u_date, u_desc, 1 if u_done else 0, f_id))
+            new_nr = st.text_input("Nummer", value=sel['fall_nummer'])
+            new_done = st.checkbox("Erledigt", value=bool(sel['erledigt']))
+            if st.form_submit_button("Update"):
+                c.execute("UPDATE falle SET fall_nummer=?, erledigt=? WHERE id=?", (new_nr, 1 if new_done else 0, sel['id']))
                 conn.commit()
-                st.success("Aktualisiert!")
                 st.rerun()
-
-        with st.expander("🗑️ Fall löschen"):
-            if st.button("Endgültig aus Datenbank löschen", type="primary") and st.checkbox("Bestätigen"):
-                c.execute("DELETE FROM media WHERE fall_id = ?", (f_id,))
-                c.execute("DELETE FROM falle WHERE id = ?", (f_id,))
-                conn.commit()
-                st.success("Gelöscht!")
-                st.rerun()
-
+        if st.button("FALL LÖSCHEN", type="primary"):
+            c.execute("DELETE FROM media WHERE fall_id=?", (sel['id'],))
+            c.execute("DELETE FROM falle WHERE id=?", (sel['id'],))
+            conn.commit()
+            st.rerun()
