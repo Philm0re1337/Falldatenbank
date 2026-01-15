@@ -1,31 +1,36 @@
 import streamlit as st
 import pandas as pd
+import sqlite3
 import datetime
+import os
 
 # --- KONFIGURATION ---
-# Das Passwort für den Zugang zur App
+DB_NAME = "fall_archiv_lokal.db"
 TEAM_PASSWORD = "2180"
 
-# --- LOGGING FUNKTION ---
-def log_fall_to_console(fnr, fdat, fbes, bilder_anzahl):
-    """
-    Schreibt die Falldaten in die Streamlit Cloud Logs.
-    Diese sind im Dashboard unter 'Manage App' -> 'Logs' einsehbar.
-    """
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_entry = f"\n--- NEUER FALL-EINTRAG [{timestamp}] ---\n"
-    log_entry += f"FALL-NUMMER: {fnr}\n"
-    log_entry += f"DATUM: {fdat}\n"
-    log_entry += f"BESCHREIBUNG: {fbes}\n"
-    log_entry += f"ANZAHL BILDER: {bilder_anzahl}\n"
-    log_entry += "--------------------------------------\n"
-    
-    # Der print-Befehl leitet die Daten in die Streamlit-Konsole um
-    print(log_entry)
-    return True
+# --- DATENBANK FUNKTIONEN ---
+def get_db_connection():
+    conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+    return conn
+
+def init_db():
+    conn = get_db_connection()
+    c = conn.cursor()
+    # Tabelle für die Fälle
+    c.execute('''CREATE TABLE IF NOT EXISTS falle 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                  fall_nummer TEXT, 
+                  datum DATE, 
+                  beschreibung TEXT, 
+                  erledigt INTEGER DEFAULT 0)''')
+    conn.commit()
+    conn.close()
+
+# Datenbank initialisieren
+init_db()
 
 # --- UI KONFIGURATION ---
-st.set_page_config(page_title="Fall-Archiv Log-System", layout="centered")
+st.set_page_config(page_title="Lokales Fall-Archiv", layout="wide")
 
 # --- AUTHENTIFIZIERUNG ---
 if "auth" not in st.session_state:
@@ -39,44 +44,62 @@ if "auth" not in st.session_state:
             st.error("Falsches Passwort")
     st.stop()
 
-# --- HAUPTSEITE ---
-st.title("📂 Fall-Protokollierung")
-st.info("Eingegebene Daten werden direkt in den System-Logs archiviert.")
+# --- NAVIGATION ---
+st.sidebar.title("Navigation")
+mode = st.sidebar.radio("Gehe zu:", ["Übersicht", "Neuanlage"])
 
-# Eingabe-Formular
-with st.form("fall_form", clear_on_submit=True):
-    col1, col2 = st.columns(2)
-    with col1:
-        fall_nummer = st.text_input("Fall-Nummer / Aktenzeichen")
-    with col2:
-        datum = st.date_input("Datum des Vorfalls", datetime.date.today())
+# --- NEUANLAGE ---
+if mode == "Neuanlage":
+    st.header("➕ Neuen Fall anlegen")
     
-    beschreibung = st.text_area("Detaillierte Fallbeschreibung")
-    
-    upload_files = st.file_uploader(
-        "Bilder/Dokumente (werden im Log vermerkt)", 
-        type=["jpg", "png", "pdf"], 
-        accept_multiple_files=True
-    )
-    
-    submit = st.form_submit_button("Fall final archivieren")
+    with st.form("neuer_fall", clear_on_submit=True):
+        fnr = st.text_input("Fall-Nummer / Kennung")
+        fdat = st.date_input("Datum", datetime.date.today())
+        fbes = st.text_area("Fallbeschreibung")
+        
+        submit = st.form_submit_button("Speichern")
+        
+        if submit:
+            if fnr and fbes:
+                conn = get_db_connection()
+                c = conn.cursor()
+                c.execute("INSERT INTO falle (fall_nummer, datum, beschreibung) VALUES (?, ?, ?)", 
+                          (fnr, fdat, fbes))
+                conn.commit()
+                conn.close()
+                st.success(f"Fall {fnr} wurde lokal gespeichert!")
+            else:
+                st.warning("Bitte füllen Sie alle Felder aus.")
 
-    if submit:
-        if fall_nummer and beschreibung:
-            anzahl_anhange = len(upload_files) if upload_files else 0
-            
-            # Daten in Logs schreiben
-            if log_fall_to_console(fall_nummer, datum, beschreibung, anzahl_anhange):
-                st.success(f"✅ Fall {fall_nummer} wurde erfolgreich im System-Log protokolliert.")
-                st.balloons()
-        else:
-            st.warning("Bitte füllen Sie mindestens die Fall-Nummer und die Beschreibung aus.")
+# --- ÜBERSICHT ---
+elif mode == "Übersicht":
+    st.header("📂 Archivierte Fälle")
+    
+    conn = get_db_connection()
+    df = pd.read_sql_query("SELECT * FROM falle ORDER BY datum DESC", conn)
+    conn.close()
+    
+    if df.empty:
+        st.info("Noch keine Fälle im Archiv vorhanden.")
+    else:
+        # Suche/Filter
+        search = st.text_input("🔍 Fall suchen (Nummer oder Beschreibung)")
+        if search:
+            df = df[df['fall_nummer'].str.contains(search, case=False) | 
+                    df['beschreibung'].str.contains(search, case=False)]
 
-# --- FOOTER / INFO ---
-st.sidebar.markdown("---")
-st.sidebar.write("### 🛠 Admin-Info")
-st.sidebar.write("Um die gespeicherten Fälle einzusehen:")
-st.sidebar.write("1. Öffne das Streamlit Dashboard.")
-st.sidebar.write("2. Klicke auf deine App.")
-st.sidebar.write("3. Wähle rechts unten 'Manage App'.")
-st.sidebar.write("4. Klicke auf den Tab 'Logs'.")
+        # Anzeige der Fälle in Kartenform
+        for _, row in df.iterrows():
+            with st.container(border=True):
+                st.subheader(f"Fall: {row['fall_nummer']}")
+                st.write(f"📅 **Datum:** {row['datum']}")
+                st.write(f"📝 **Beschreibung:** {row['beschreibung']}")
+                
+                # Button zum Löschen (Optional)
+                if st.button(f"Löschen #{row['id']}", key=f"del_{row['id']}"):
+                    conn = get_db_connection()
+                    c = conn.cursor()
+                    c.execute("DELETE FROM falle WHERE id = ?", (row['id'],))
+                    conn.commit()
+                    conn.close()
+                    st.rerun()
