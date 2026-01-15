@@ -18,30 +18,33 @@ DB_NAME = "fall_archiv_cloud.db"
 def get_gdrive_service():
     try:
         if "gcp_service_account" not in st.secrets:
-            st.error("❌ Secrets 'gcp_service_account' nicht gefunden!")
+            st.error("❌ Secrets nicht gefunden!")
             return None
             
+        # Kopie der Secrets ziehen
         creds_info = dict(st.secrets["gcp_service_account"])
         
-        # Bereinigung der IDs (Padding- & Leerzeichen-Fix)
-        for k in ["project_id", "private_key_id", "client_id", "client_email"]:
-            if k in creds_info:
-                creds_info[k] = str(creds_info[k]).strip()
-
-        # Key-Formatierung
+        # --- ROBUSTE BEREINIGUNG ---
+        for k, v in creds_info.items():
+            if isinstance(v, str):
+                # Entfernt Leerzeichen, Tabs und Zeilenumbrüche am Anfang/Ende
+                creds_info[k] = v.strip()
+        
+        # Speziell für den Private Key: Zeilenumbrüche im String fixen
         if "private_key" in creds_info:
-            creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n").strip()
+            creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
 
         creds = service_account.Credentials.from_service_account_info(
             creds_info, 
             scopes=['https://www.googleapis.com/auth/drive']
         )
         
-        # Zeit-Fix für Google Server
+        # Zeit-Fix gegen 'invalid_grant'
         creds._iat = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=30)
         
         return build('drive', 'v3', credentials=creds)
     except Exception as e:
+        # Hier wird jetzt der genaue Grund angezeigt, falls es noch hakt
         st.error(f"❌ Verbindungsfehler: {e}")
         return None
 
@@ -167,3 +170,4 @@ elif mode == "Verwalten":
             c.execute("DELETE FROM falle WHERE id=?", (sel['id'],))
             conn.commit()
             st.rerun()
+
