@@ -17,38 +17,29 @@ DB_NAME = "fall_archiv_cloud.db"
 @st.cache_resource
 def get_gdrive_service():
     try:
-        if "gcp_service_account" not in st.secrets:
-            st.error("❌ Secrets 'gcp_service_account' nicht gefunden!")
-            return None
-            
-        # Wir laden die Daten und bereinigen JEDES Feld einzeln
-        raw_info = dict(st.secrets["gcp_service_account"])
-        clean_info = {}
-        
-        for k, v in raw_info.items():
-            if isinstance(v, str):
-                # .strip() entfernt Leerzeichen, Tabs und unsichtbare Umbrüche am Rand
-                clean_info[k] = v.strip()
-            else:
-                clean_info[k] = v
-        
-        # Den Private Key speziell behandeln für die Zeilenumbrüche
-        if "private_key" in clean_info:
-            clean_info["private_key"] = clean_info["private_key"].replace("\\n", "\n")
+        # Manuelles Zusammenbauen statt direktes dict(st.secrets)
+        creds_info = {
+            "type": st.secrets["GCP_TYPE"].strip(),
+            "project_id": st.secrets["GCP_PROJECT_ID"].strip(),
+            "private_key_id": st.secrets["GCP_PRIVATE_KEY_ID"].strip(),
+            "private_key": st.secrets["GCP_PRIVATE_KEY"].strip(),
+            "client_email": st.secrets["GCP_CLIENT_EMAIL"].strip(),
+            "client_id": st.secrets["GCP_CLIENT_ID"].strip(),
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_x509_cert_url": f"https://www.googleapis.com/robot/v1/metadata/x509/{st.secrets['GCP_CLIENT_EMAIL'].strip().replace('@', '%40')}"
+        }
 
-        # Erstellung der Credentials mit den gesäuberten Daten
         creds = service_account.Credentials.from_service_account_info(
-            clean_info, 
+            creds_info, 
             scopes=['https://www.googleapis.com/auth/drive']
         )
         
-        # Zeit-Fix (IAT) für Google Server Synchronisation
         creds._iat = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=30)
-        
         return build('drive', 'v3', credentials=creds)
     except Exception as e:
-        # Fehlermeldung mit Typ-Info für bessere Diagnose
-        st.error(f"❌ Verbindungsfehler ({type(e).__name__}): {e}")
+        st.error(f"❌ Verbindungsfehler: {e}")
         return None
 
 # GLOBAL DEFINIEREN
@@ -173,5 +164,6 @@ elif mode == "Verwalten":
             c.execute("DELETE FROM falle WHERE id=?", (sel['id'],))
             conn.commit()
             st.rerun()
+
 
 
