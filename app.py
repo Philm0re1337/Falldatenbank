@@ -18,15 +18,19 @@ def get_gdrive():
     try:
         key_file = 'credentials.json'
         if not os.path.exists(key_file):
-            st.error(f"⚠️ Datei '{key_file}' nicht gefunden! Bitte in das GitHub-Repo hochladen.")
+            st.error(f"⚠️ Datei '{key_file}' nicht gefunden!")
             return None
             
         scope = ['https://www.googleapis.com/auth/drive']
         creds = ServiceAccountCredentials.from_json_keyfile_name(key_file, scope)
         
-        # Authentifizierung ohne client_secrets.json erzwingen
+        # --- KORREKTUR HIER ---
         gauth = GoogleAuth()
+        # Diese Zeile verhindert, dass PyDrive2 nach client_secrets.json sucht:
+        gauth.settings['client_config_backend'] = 'settings' 
         gauth.credentials = creds
+        # ----------------------
+        
         return GoogleDrive(gauth)
     except Exception as e:
         st.error(f"❌ Fehler bei der Google Drive Verbindung: {e}")
@@ -201,3 +205,4 @@ elif choice == "Bearbeiten & Löschen":
                 conn.commit()
                 st.success("Gelöscht!")
                 st.rerun()
+
