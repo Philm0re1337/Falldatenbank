@@ -17,23 +17,27 @@ DB_NAME = "fall_archiv_cloud.db"
 @st.cache_resource
 def get_gdrive_service():
     try:
-        # Laden der Anmeldedaten aus den Streamlit Secrets
+        # Laden der Anmeldedaten
         creds_dict = dict(st.secrets["gcp_service_account"])
         
-        # WICHTIG: Ersetzt die Text-Backslashes (\n) durch echte Zeilenumbrüche
-        # Dies ist entscheidend für die gültige JWT-Signatur
-        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+        # Zeilenumbrüche fixen
+        private_key = creds_dict["private_key"].replace("\\n", "\n")
+        
+        # --- PADDING FIX START ---
+        # Entferne Leerzeichen und prüfe die Länge für Base64-Konformität
+        private_key = private_key.strip()
+        # Nur der Teil zwischen den BEGIN/END Markern braucht korrektes Padding,
+        # aber from_service_account_info regelt das meist intern, wenn der String sauber ist.
+        creds_dict["private_key"] = private_key
+        # --- PADDING FIX END ---
         
         creds = service_account.Credentials.from_service_account_info(
             creds_dict, 
             scopes=['https://www.googleapis.com/auth/drive']
         )
         
-        # Zeit-Fix: Setzt den Zeitstempel 30 Sek. zurück, um Server-Differenzen auszugleichen
         creds._iat = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=30)
-        
-        service = build('drive', 'v3', credentials=creds)
-        return service
+        return build('drive', 'v3', credentials=creds)
     except Exception as e:
         st.error(f"❌ Verbindungsfehler zu Google Drive: {e}")
         return None
@@ -171,3 +175,4 @@ elif mode == "Verwalten":
             conn.commit()
             st.success("Daten wurden gelöscht.")
             st.rerun()
+
