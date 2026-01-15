@@ -18,31 +18,29 @@ DB_NAME = "fall_archiv_cloud.db"
 @st.cache_resource
 def get_gdrive_service():
     try:
-        # Den JSON-String aus den Secrets laden
-        if "gcp_service_account" not in st.secrets:
-            st.error("❌ Secrets 'gcp_service_account' nicht gefunden!")
-            return None
-            
-        json_string = st.secrets["gcp_service_account"]["json_data"]
-        
-        # Parsen des JSON (verhindert manuelle Formatierungsfehler)
-        creds_info = json.loads(json_string)
-        
-        # Sicherstellen, dass Zeilenumbrüche im Key korrekt sind
-        if "private_key" in creds_info:
-            creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
+        # Wir bauen das Dictionary manuell aus den flachen Secrets zusammen
+        creds_info = {
+            "type": st.secrets["GCP_TYPE"],
+            "project_id": st.secrets["GCP_PROJECT_ID"],
+            "private_key_id": st.secrets["GCP_PRIVATE_KEY_ID"],
+            "private_key": st.secrets["GCP_PRIVATE_KEY"].replace("\\n", "\n"),
+            "client_email": st.secrets["GCP_CLIENT_EMAIL"],
+            "client_id": st.secrets["GCP_CLIENT_ID"],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_x509_cert_url": f"https://www.googleapis.com/robot/v1/metadata/x509/{st.secrets['GCP_CLIENT_EMAIL'].replace('@', '%40')}"
+        }
 
         creds = service_account.Credentials.from_service_account_info(
             creds_info, 
             scopes=['https://www.googleapis.com/auth/drive']
         )
         
-        # Zeit-Sync gegen 'invalid_grant' Fehler
         creds._iat = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=30)
-        
         return build('drive', 'v3', credentials=creds)
     except Exception as e:
-        st.error(f"❌ Kritischer Verbindungsfehler: {e}")
+        st.error(f"❌ Verbindungsfehler: {e}")
         return None
 
 # Globale Instanz erstellen
@@ -181,3 +179,4 @@ elif mode == "Verwalten":
             conn.commit()
             st.success(f"Fall {target} wurde gelöscht.")
             st.rerun()
+
