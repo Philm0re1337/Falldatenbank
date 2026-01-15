@@ -3,6 +3,7 @@ import pandas as pd
 import sqlite3
 import os
 import io
+import json
 import datetime
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -13,29 +14,30 @@ GDRIVE_FOLDER_ID = "0B5UeXbdEo09pR1h2T0pJNmdLMUE"
 TEAM_PASSWORD = "2180"
 DB_NAME = "fall_archiv_cloud.db"
 
-# --- GOOGLE DRIVE VERBINDUNG (FEHLERTOLERANT) ---
-import json
-
+# --- GOOGLE DRIVE VERBINDUNG (ROBUST VIA JSON PARSING) ---
 @st.cache_resource
 def get_gdrive_service():
     try:
-        # Den gesamten String aus den Secrets laden
+        # Den JSON-String aus den Secrets laden
+        if "gcp_service_account" not in st.secrets:
+            st.error("❌ Secrets 'gcp_service_account' nicht gefunden!")
+            return None
+            
         json_string = st.secrets["gcp_service_account"]["json_data"]
         
-        # In ein echtes Python-Dictionary umwandeln
+        # Parsen des JSON (verhindert manuelle Formatierungsfehler)
         creds_info = json.loads(json_string)
         
-        # Sicherstellen, dass der Private Key korrekt formatiert ist
+        # Sicherstellen, dass Zeilenumbrüche im Key korrekt sind
         if "private_key" in creds_info:
             creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
 
-        # Credentials erstellen
         creds = service_account.Credentials.from_service_account_info(
             creds_info, 
             scopes=['https://www.googleapis.com/auth/drive']
         )
         
-        # Zeit-Sync
+        # Zeit-Sync gegen 'invalid_grant' Fehler
         creds._iat = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=30)
         
         return build('drive', 'v3', credentials=creds)
@@ -43,7 +45,7 @@ def get_gdrive_service():
         st.error(f"❌ Kritischer Verbindungsfehler: {e}")
         return None
 
-# GLOBAL DEFINIEREN
+# Globale Instanz erstellen
 drive_service = get_gdrive_service()
 
 # --- DATENBANK SETUP ---
@@ -64,7 +66,6 @@ conn.commit()
 def upload_to_gdrive(file, filename):
     try:
         if drive_service is None:
-            st.error("Keine Verbindung zu Google Drive.")
             return None
             
         file_metadata = {'name': filename, 'parents': [GDRIVE_FOLDER_ID]}
@@ -79,11 +80,15 @@ def upload_to_gdrive(file, filename):
         ).execute()
         
         f_id = gfile.get('id')
+        # Datei für die Anzeige in der App freigeben
         drive_service.permissions().create(fileId=f_id, body={'type': 'anyone', 'role': 'reader'}).execute()
         return f_id
     except Exception as e:
         st.error(f"❗ Upload-Fehler ({filename}): {e}")
         return None
+
+# --- UI START ---
+st.set_page_config(page_title="Team Cloud Archiv", layout="wide")
 
 # --- AUTHENTIFIZIERUNG ---
 if "auth" not in st.session_state:
@@ -97,8 +102,7 @@ if "auth" not in st.session_state:
             st.error("Falsches Passwort")
     st.stop()
 
-# --- UI NAVIGATION ---
-st.set_page_config(page_title="Team Cloud Archiv", layout="wide")
+# --- NAVIGATION ---
 st.sidebar.title("Menü")
 mode = st.sidebar.radio("Navigation", ["Übersicht", "Neuanlage", "Verwalten"])
 
@@ -113,61 +117,67 @@ if mode == "Neuanlage":
         u_vids = st.file_uploader("Videos", type=["mp4", "mov"], accept_multiple_files=True)
         
         if st.form_submit_button("Speichern"):
-            # HIER WAR DER FEHLER: drive_service muss existieren
             if fnr and u_imgs and drive_service:
-                with st.spinner("Hochladen..."):
-                    hid = upload_to_gdrive(u_imgs[0], f"{fnr}_MAIN.jpg")
-                    if hid:
-                        c.execute("INSERT INTO falle (fall_nummer, datum, beschreibung, hauptbild_id) VALUES (?,?,?,?)",
-                                  (fnr, fdat, fbes, hid))
-                        last_id = c.lastrowid
-                        for img in u_imgs:
-                            mid = upload_to_gdrive(img, f"{fnr}_IMG_{img.name}")
-                            c.execute("INSERT INTO media (fall_id, file_id, file_type) VALUES (?,?,'image')", (last_id, mid))
-                        if u_vids:
-                            for vid in u_vids:
-                                vid_id = upload_to_gdrive(vid, f"{fnr}_VID_{vid.name}")
-                                c.execute("INSERT INTO media (fall_id, file_id, file_type) VALUES (?,?,'video')", (last_id, vid_id))
-                        conn.commit()
-                        st.success("✅ Fall erfolgreich gespeichert!")
+                with st.spinner("Daten werden in die Cloud übertragen..."):
+                    # 1. Erstes Bild als Vorschau
+                    hid = upload_to_gdrive(u_imgs[0], f"{fnr}_VORSCHAU.jpg")
+                    c.execute("INSERT INTO falle (fall_nummer, datum, beschreibung, hauptbild_id) VALUES (?,?,?,?)",
+                              (fnr, fdat, fbes, hid))
+                    last_id = c.lastrowid
+                    
+                    # 2. Alle Bilder hochladen
+                    for img in u_imgs:
+                        mid = upload_to_gdrive(img, f"{fnr}_BILD_{img.name}")
+                        c.execute("INSERT INTO media (fall_id, file_id, file_type) VALUES (?,?,'image')", (last_id, mid))
+                    
+                    # 3. Videos hochladen
+                    if u_vids:
+                        for vid in u_vids:
+                            vid_id = upload_to_gdrive(vid, f"{fnr}_VID_{vid.name}")
+                            c.execute("INSERT INTO media (fall_id, file_id, file_type) VALUES (?,?,'video')", (last_id, vid_id))
+                    
+                    conn.commit()
+                    st.success(f"✅ Fall {fnr} erfolgreich archiviert!")
             else:
-                st.warning("Bitte Fall-Nummer und Bilder angeben (oder Drive-Verbindung prüfen).")
+                st.warning("Bitte füllen Sie alle Felder aus und stellen Sie sicher, dass Google Drive verbunden ist.")
 
 # --- ÜBERSICHT ---
 elif mode == "Übersicht":
     st.header("📂 Archiv Übersicht")
     df = pd.read_sql_query("SELECT * FROM falle ORDER BY datum DESC", conn)
+    
+    if df.empty:
+        st.info("Noch keine Einträge vorhanden.")
+    
     for _, row in df.iterrows():
         with st.container(border=True):
-            c1, c2 = st.columns([1, 4])
-            c1.image(f"https://drive.google.com/uc?id={row['hauptbild_id']}")
-            with c2:
+            col1, col2 = st.columns([1, 4])
+            col1.image(f"https://drive.google.com/uc?id={row['hauptbild_id']}")
+            with col2:
                 st.subheader(f"Fall {row['fall_nummer']}")
+                st.write(f"📅 **Datum:** {row['datum']}")
                 st.write(row['beschreibung'])
-                with st.expander("Medien anzeigen"):
+                with st.expander("📸 Alle Medien anzeigen"):
                     m_df = pd.read_sql_query(f"SELECT * FROM media WHERE fall_id = {row['id']}", conn)
-                    cols = st.columns(3)
+                    m_cols = st.columns(3)
                     for i, m_row in m_df.iterrows():
                         url = f"https://drive.google.com/uc?id={m_row['file_id']}"
-                        with cols[i % 3]:
-                            if m_row['file_type'] == "video": st.video(url)
-                            else: st.image(url)
+                        with m_cols[i % 3]:
+                            if m_row['file_type'] == "video":
+                                st.video(url)
+                            else:
+                                st.image(url)
 
 # --- VERWALTEN ---
 elif mode == "Verwalten":
-    st.header("⚙️ Verwalten")
+    st.header("⚙️ Verwaltung")
     df = pd.read_sql_query("SELECT * FROM falle", conn)
     if not df.empty:
-        target = st.selectbox("Fall wählen", df['fall_nummer'].tolist())
+        target = st.selectbox("Fall auswählen", df['fall_nummer'].tolist())
         if st.button("FALL LÖSCHEN", type="primary"):
             sel = df[df['fall_nummer'] == target].iloc[0]
             c.execute("DELETE FROM media WHERE fall_id=?", (sel['id'],))
             c.execute("DELETE FROM falle WHERE id=?", (sel['id'],))
             conn.commit()
+            st.success(f"Fall {target} wurde gelöscht.")
             st.rerun()
-
-
-
-
-
-
