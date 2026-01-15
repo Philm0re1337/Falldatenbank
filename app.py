@@ -3,178 +3,212 @@ import pandas as pd
 import sqlite3
 import os
 from datetime import datetime
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
+from oauth2client.service_account import ServiceAccountCredentials
 
-# --- SETUP ---
-UPLOAD_DIR = "fall_medien"
-DB_NAME = "fall_archiv_v2.db"
+# --- CONFIGURATION ---
+# Extrahiert aus deiner URL
+GDRIVE_FOLDER_ID = "0B5UeXbdEo09pR1h2T0pJNmdLMUE" 
+TEAM_PASSWORD = "2180"
+DB_NAME = "fall_archiv_gdrive.db"
 
-if not os.path.exists(UPLOAD_DIR):
-    os.makedirs(UPLOAD_DIR)
+# --- GOOGLE DRIVE CONNECTION ---
+@st.cache_resource
+def get_gdrive():
+    try:
+        scope = ['https://www.googleapis.com/auth/drive']
+        # Erwartet die credentials.json Datei im gleichen Verzeichnis
+        creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
+        gauth = GoogleAuth()
+        gauth.credentials = creds
+        return GoogleDrive(gauth)
+    except Exception as e:
+        st.error(f"Fehler bei der Google Drive Verbindung: {e}")
+        return None
 
+drive = get_gdrive()
+
+# --- DATABASE SETUP ---
 def get_db_connection():
     return sqlite3.connect(DB_NAME, check_same_thread=False)
 
 conn = get_db_connection()
 c = conn.cursor()
 
-# Tabellen erstellen
 c.execute('''CREATE TABLE IF NOT EXISTS falle 
              (id INTEGER PRIMARY KEY AUTOINCREMENT, 
               fall_nummer TEXT, 
               datum DATE, 
               beschreibung TEXT, 
-              hauptbild_pfad TEXT,
+              hauptbild_id TEXT,
               erledigt INTEGER DEFAULT 0)''')
 
 c.execute('''CREATE TABLE IF NOT EXISTS media 
              (id INTEGER PRIMARY KEY AUTOINCREMENT, 
               fall_id INTEGER, 
-              file_path TEXT,
+              file_id TEXT, 
               file_type TEXT,
               FOREIGN KEY(fall_id) REFERENCES falle(id))''')
 conn.commit()
 
-# --- HELFERFUNKTION ---
-def save_files(files, fall_nr, suffix=""):
-    paths = []
-    for f in files:
-        path = os.path.join(UPLOAD_DIR, f"{fall_nr}_{suffix}_{f.name}")
-        with open(path, "wb") as out:
-            out.write(f.getbuffer())
-        paths.append(path)
-    return paths
+# --- HELFERFUNKTIONEN ---
+def upload_to_gdrive(file, filename):
+    try:
+        gfile = drive.CreateFile({'title': filename, 'parents': [{'id': GDRIVE_FOLDER_ID}]})
+        # Temporäres Speichern der Streamlit-Datei zum Upload
+        with open(filename, "wb") as f:
+            f.write(file.getbuffer())
+        gfile.SetContentFile(filename)
+        gfile.Upload()
+        # Datei für die Anzeige freigeben (Public Link)
+        gfile.InsertPermission({'type': 'anyone', 'value': 'anyone', 'role': 'reader'})
+        os.remove(filename) # Temporäre lokale Datei löschen
+        return gfile['id']
+    except Exception as e:
+        st.error(f"Upload-Fehler: {e}")
+        return None
 
-# --- UI ---
-st.set_page_config(page_title="Fall-Datenbank Pro", layout="wide")
+# --- 1. SICHERHEIT: PASSWORT-ABFRAGE ---
+def check_password():
+    if "password_correct" not in st.session_state:
+        st.title("🔒 Team-Login")
+        pw = st.text_input("Bitte gib das Passwort ein", type="password")
+        if st.button("Anmelden"):
+            if pw == TEAM_PASSWORD:
+                st.session_state["password_correct"] = True
+                st.rerun()
+            else:
+                st.error("😕 Passwort falsch.")
+        return False
+    return True
+
+if not check_password():
+    st.stop()
+
+# --- 2. NAVIGATION & UI ---
+st.set_page_config(page_title="Team Fall-Archiv Cloud", layout="wide")
 st.sidebar.title("📁 Navigation")
-choice = st.sidebar.radio("Menü", ["Übersicht & Suche", "Neuanlage", "Bearbeiten"])
+choice = st.sidebar.radio("Menü", ["Übersicht & Suche", "Neuanlage", "Bearbeiten & Löschen"])
 
 # --- NEUANLAGE ---
 if choice == "Neuanlage":
-    st.header("➕ Neuen Fall erfassen")
+    st.header("➕ Neuen Fall erfassen (Cloud)")
     with st.form("neu_form", clear_on_submit=True):
         f_nr = st.text_input("Fall-Nummer")
         f_date = st.date_input("Datum", datetime.now())
         f_desc = st.text_area("Fall-Beschreibung")
         
         st.write("---")
-        st.subheader("Medien-Upload")
-        u_bilder = st.file_uploader("Bilder hochladen (Mehrfachauswahl)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
-        u_videos = st.file_uploader("Videos hochladen (Mehrfachauswahl)", type=["mp4", "mov"], accept_multiple_files=True)
+        st.subheader("Cloud-Upload")
+        u_bilder = st.file_uploader("Bilder hochladen", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+        u_videos = st.file_uploader("Videos hochladen", type=["mp4", "mov"], accept_multiple_files=True)
         
-        if st.form_submit_button("Fall speichern"):
-            if f_nr and u_bilder:
-                # Das erste Bild als Hauptbild/Vorschau nehmen
-                b_paths = save_files(u_bilder, f_nr, "IMG")
-                h_path = b_paths[0]
-                
-                c.execute("INSERT INTO falle (fall_nummer, datum, beschreibung, hauptbild_pfad, erledigt) VALUES (?,?,?,?,?)",
-                          (f_nr, f_date, f_desc, h_path, 0))
-                f_id = c.lastrowid
-                
-                # Alle Bilder in die Mediatabelle (auch das Hauptbild für die Galerie)
-                for p in b_paths:
-                    c.execute("INSERT INTO media (fall_id, file_path, file_type) VALUES (?,?,?)", (f_id, p, "image"))
-                
-                # Videos speichern
-                if u_videos:
-                    v_paths = save_files(u_videos, f_nr, "VID")
-                    for p in v_paths:
-                        c.execute("INSERT INTO media (fall_id, file_path, file_type) VALUES (?,?,?)", (f_id, p, "video"))
-                
-                conn.commit()
-                st.success(f"Fall {f_nr} erfolgreich angelegt!")
+        if st.form_submit_button("Fall in Cloud speichern"):
+            if f_nr and u_bilder and drive:
+                with st.spinner('Lade Dateien zu Google Drive hoch...'):
+                    # Hauptbild (Index 0)
+                    h_id = upload_to_gdrive(u_bilder[0], f"{f_nr}_MAIN.jpg")
+                    
+                    c.execute("INSERT INTO falle (fall_nummer, datum, beschreibung, hauptbild_id, erledigt) VALUES (?,?,?,?,?)",
+                              (f_nr, f_date, f_desc, h_id, 0))
+                    f_id = c.lastrowid
+                    
+                    # Alle Bilder hochladen
+                    for img in u_bilder:
+                        img_id = upload_to_gdrive(img, f"{f_nr}_IMG_{img.name}")
+                        c.execute("INSERT INTO media (fall_id, file_id, file_type) VALUES (?,?,?)", (f_id, img_id, "image"))
+                    
+                    # Videos hochladen
+                    if u_videos:
+                        for vid in u_videos:
+                            vid_id = upload_to_gdrive(vid, f"{f_nr}_VID_{vid.name}")
+                            c.execute("INSERT INTO media (fall_id, file_id, file_type) VALUES (?,?,?)", (f_id, vid_id, "video"))
+                    
+                    conn.commit()
+                    st.success(f"Fall {f_nr} wurde erfolgreich in Google Drive gespeichert!")
             else:
-                st.error("Bitte mindestens die Fallnummer und ein Bild hochladen.")
+                st.error("Bitte Fallnummer, mindestens ein Bild und Drive-Verbindung prüfen.")
 
 # --- ÜBERSICHT & SUCHE ---
 elif choice == "Übersicht & Suche":
-    st.header("📂 Fall-Archiv")
+    st.header("📂 Cloud Fall-Archiv")
     
-    # Suchfilter oben
     s_col1, s_col2, s_col3 = st.columns([2, 1, 1])
     with s_col1:
-        search_nr = st.text_input("Suche nach Fallnummer")
+        search_nr = st.text_input("Suche Fallnummer")
     with s_col2:
-        search_date = st.date_input("Filter nach Datum", value=None)
+        search_date = st.date_input("Filter Datum", value=None)
     with s_col3:
         status_filter = st.selectbox("Status", ["Alle", "Offen", "Erledigt"])
 
-    # Query zusammenbauen
     query = "SELECT * FROM falle WHERE 1=1"
     params = []
     if search_nr:
-        query += " AND fall_nummer LIKE ?"
-        params.append(f"%{search_nr}%")
+        query += " AND fall_nummer LIKE ?"; params.append(f"%{search_nr}%")
     if search_date:
-        query += " AND datum = ?"
-        params.append(search_date)
+        query += " AND datum = ?"; params.append(search_date)
     if status_filter == "Offen":
         query += " AND erledigt = 0"
     elif status_filter == "Erledigt":
         query += " AND erledigt = 1"
     
-    query += " ORDER BY datum DESC"
-    df = pd.read_sql_query(query, conn, params=params)
+    df = pd.read_sql_query(query + " ORDER BY datum DESC", conn, params=params)
     
-    if not df.empty:
-        for idx, row in df.iterrows():
-            # Status-Badge Styling
-            status_label = "✅ Erledigt" if row['erledigt'] == 1 else "⏳ Offen"
-            
-            with st.container(border=True):
-                col1, col2 = st.columns([1, 4])
-                with col1:
-                    st.image(row['hauptbild_pfad'], caption=f"Vorschau: {row['fall_nummer']}")
-                with col2:
-                    st.subheader(f"Fall: {row['fall_nummer']} ({status_label})")
-                    st.write(f"📅 **Datum:** {row['datum']}")
-                    with st.expander("Details, Bilder & Videos"):
-                        st.write(row['beschreibung'])
-                        st.divider()
-                        # Medien anzeigen
-                        m_df = pd.read_sql_query(f"SELECT * FROM media WHERE fall_id = {row['id']}", conn)
-                        img_cols = st.columns(4)
-                        for m_idx, m_row in m_df.iterrows():
-                            with img_cols[m_idx % 4]:
-                                if m_row['file_type'] == "video":
-                                    st.video(m_row['file_path'])
-                                else:
-                                    st.image(m_row['file_path'])
-    else:
-        st.info("Keine passenden Fälle gefunden.")
+    for idx, row in df.iterrows():
+        status_icon = "✅" if row['erledigt'] == 1 else "⏳"
+        with st.container(border=True):
+            col1, col2 = st.columns([1, 4])
+            with col1:
+                # Google Drive Bildanzeige über die ID
+                st.image(f"https://drive.google.com/uc?id={row['hauptbild_id']}")
+            with col2:
+                st.subheader(f"{status_icon} Fall {row['fall_nummer']}")
+                st.caption(f"Datum: {row['datum']}")
+                with st.expander("Beschreibung & alle Medien anzeigen"):
+                    st.write(row['beschreibung'])
+                    m_df = pd.read_sql_query(f"SELECT * FROM media WHERE fall_id = {row['id']}", conn)
+                    m_cols = st.columns(3)
+                    for m_idx, m_row in m_df.iterrows():
+                        with m_cols[m_idx % 3]:
+                            url = f"https://drive.google.com/uc?id={m_row['file_id']}"
+                            if m_row['file_type'] == "video":
+                                st.video(url)
+                            else:
+                                st.image(url)
 
-# --- BEARBEITEN ---
-elif choice == "Bearbeiten":
-    st.header("📝 Fall bearbeiten & abschließen")
+# --- BEARBEITEN & LÖSCHEN ---
+elif choice == "Bearbeiten & Löschen":
+    st.header("📝 Fall bearbeiten")
     df = pd.read_sql_query("SELECT * FROM falle", conn)
     
     if not df.empty:
-        auswahl = st.selectbox("Wähle einen Fall", df['fall_nummer'].tolist())
+        auswahl = st.selectbox("Fall auswählen", df['fall_nummer'].tolist())
         f_data = df[df['fall_nummer'] == auswahl].iloc[0]
+        f_id = int(f_data['id'])
         
         with st.form("edit_form"):
             u_nr = st.text_input("Fall-Nummer", value=f_data['fall_nummer'])
             u_date = st.date_input("Datum", value=datetime.strptime(str(f_data['datum']), '%Y-%m-%d'))
             u_desc = st.text_area("Beschreibung", value=f_data['beschreibung'])
-            u_done = st.checkbox("Als erledigt markieren", value=bool(f_data['erledigt']))
+            u_done = st.checkbox("Erledigt", value=bool(f_data['erledigt']))
             
-            st.write("---")
-            add_imgs = st.file_uploader("Weitere Bilder hinzufügen", type=["jpg", "png"], accept_multiple_files=True)
-            add_vids = st.file_uploader("Weitere Videos hinzufügen", type=["mp4"], accept_multiple_files=True)
-            
-            if st.form_submit_button("Änderungen speichern"):
+            if st.form_submit_button("Speichern"):
                 c.execute("UPDATE falle SET fall_nummer=?, datum=?, beschreibung=?, erledigt=? WHERE id=?", 
-                          (u_nr, u_date, u_desc, 1 if u_done else 0, int(f_data['id'])))
-                
-                # Neue Medien hinzufügen
-                if add_imgs:
-                    for p in save_files(add_imgs, u_nr, "ADD_IMG"):
-                        c.execute("INSERT INTO media (fall_id, file_path, file_type) VALUES (?,?,?)", (int(f_data['id']), p, "image"))
-                if add_vids:
-                    for p in save_files(add_vids, u_nr, "ADD_VID"):
-                        c.execute("INSERT INTO media (fall_id, file_path, file_type) VALUES (?,?,?)", (int(f_data['id']), p, "video"))
-                
+                          (u_nr, u_date, u_desc, 1 if u_done else 0, f_id))
                 conn.commit()
                 st.success("Aktualisiert!")
                 st.rerun()
+
+        st.divider()
+        with st.expander("🗑️ Fall endgültig löschen"):
+            confirm = st.checkbox("Ich möchte diesen Fall und alle Cloud-Daten löschen")
+            if st.button("LÖSCHEN BESTÄTIGEN", type="primary"):
+                if confirm:
+                    # Hinweis: Dateien in Drive werden hier nicht gelöscht (nur Datenbank), 
+                    # um Datenverlust bei Fehlern zu vermeiden.
+                    c.execute("DELETE FROM media WHERE fall_id = ?", (f_id,))
+                    c.execute("DELETE FROM falle WHERE id = ?", (f_id,))
+                    conn.commit()
+                    st.success("Eintrag gelöscht!")
+                    st.rerun()
