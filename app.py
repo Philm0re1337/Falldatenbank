@@ -18,34 +18,37 @@ DB_NAME = "fall_archiv_cloud.db"
 def get_gdrive_service():
     try:
         if "gcp_service_account" not in st.secrets:
-            st.error("❌ Secrets nicht gefunden!")
+            st.error("❌ Secrets 'gcp_service_account' nicht gefunden!")
             return None
             
-        # Kopie der Secrets ziehen
-        creds_info = dict(st.secrets["gcp_service_account"])
+        # Wir laden die Daten und bereinigen JEDES Feld einzeln
+        raw_info = dict(st.secrets["gcp_service_account"])
+        clean_info = {}
         
-        # --- ROBUSTE BEREINIGUNG ---
-        for k, v in creds_info.items():
+        for k, v in raw_info.items():
             if isinstance(v, str):
-                # Entfernt Leerzeichen, Tabs und Zeilenumbrüche am Anfang/Ende
-                creds_info[k] = v.strip()
+                # .strip() entfernt Leerzeichen, Tabs und unsichtbare Umbrüche am Rand
+                clean_info[k] = v.strip()
+            else:
+                clean_info[k] = v
         
-        # Speziell für den Private Key: Zeilenumbrüche im String fixen
-        if "private_key" in creds_info:
-            creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
+        # Den Private Key speziell behandeln für die Zeilenumbrüche
+        if "private_key" in clean_info:
+            clean_info["private_key"] = clean_info["private_key"].replace("\\n", "\n")
 
+        # Erstellung der Credentials mit den gesäuberten Daten
         creds = service_account.Credentials.from_service_account_info(
-            creds_info, 
+            clean_info, 
             scopes=['https://www.googleapis.com/auth/drive']
         )
         
-        # Zeit-Fix gegen 'invalid_grant'
+        # Zeit-Fix (IAT) für Google Server Synchronisation
         creds._iat = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=30)
         
         return build('drive', 'v3', credentials=creds)
     except Exception as e:
-        # Hier wird jetzt der genaue Grund angezeigt, falls es noch hakt
-        st.error(f"❌ Verbindungsfehler: {e}")
+        # Fehlermeldung mit Typ-Info für bessere Diagnose
+        st.error(f"❌ Verbindungsfehler ({type(e).__name__}): {e}")
         return None
 
 # GLOBAL DEFINIEREN
@@ -170,4 +173,5 @@ elif mode == "Verwalten":
             c.execute("DELETE FROM falle WHERE id=?", (sel['id'],))
             conn.commit()
             st.rerun()
+
 
