@@ -18,44 +18,15 @@ DB_NAME = "fall_archiv_cloud.db"
 @st.cache_resource
 def get_gdrive_service():
     try:
-        # Den Key absolut sauber als einzeiligen String definieren
-        # Wichtig: KEINE Leerzeichen am Ende der Zeilen im Code!
-        key_raw = (
-            "-----BEGIN PRIVATE KEY-----\n"
-            "MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDYewPQIsMaAReC\n"
-            "X2pDzPnXDnIxvrKkUqa+FarCFdZRXETjqG9aeIsBK9h8Ath+YEgf6JoUmUEWov1l\n"
-            "nKTnxSPwFnrESy0oBw/KVMeZhdN7eqbMhg03tsSlvL6wNlUk8JheJTO5cojCqoHW\n"
-            "I6pe6ke5XvGpiA6zjwmH/zU8JkmoIFceh1qfkEN5+pV7X64k5Cbh4qpF9cajAHV2\n"
-            "baeZXiFzMcPP1Es4pPn/LS+cIw1h2Fqq89sdeb0y0ZiU0xVvTRmek5ULmdGYkQlx\n"
-            "KvYv0ugex95fJeqtGKX8Ti9Vq6qOTOEjquWeakd48o3MWW4uCGOOgdZzZEIqwGcm\n"
-            "yJZiWJGZAgMBAAECggEAH6OA9+kwtwr8Tt1XmE+rnxr5JRyQGtSKkqLziTisUUlJ\n"
-            "NzWdiq0t8a6hDeTTk8rKF8HEzShl2yNYogJuFoKZQURjzm8HSz+W9vUDlAQ7V6Ni\n"
-            "H+eipGcln+xxOStDr+mq9y18PQkIhFzrq2qcgpE+iNDfxG2CaotH8xShSOh2oOfO\n"
-            "LosD46iLbSPqKvTZ2mPHqxAI3tXkS9XDJrU405CvdqsB/ABNJ/rgxn5Tkzexm6u+\n"
-            "LuY0f5HFT26+Q+0CaH+BtcnBCNd/jlYmBBI+gic8eOEFQC6RsCVNZn8cRjn92Ulk\n"
-            "H0PtQ4a7aDiFZV+NciYqle3VOJ9JKQW9QmMo2eMGJQKBgQD5YpPM2Kxx2uTmZYDz\n"
-            "YfNYEMTuQDfhat9yrcVaosMt0SzIzjDvQMwOc7517fdKpUVeeqfp4ncsCLZlX3Lj\n"
-            "Youw5KxwSa7U53qt7sVmoN5xI0u2hzlw+f3ZKklEeRHm96c/buiMof19CIlXt0xa\n"
-            "DYWMFj15suMbbHtv+IUk3v0HBQKBgQDeOQC2TCPm2ewYRhsBJ5Cpbf/gEUtWyKlY\n"
-            "x4nMGovgdA5bkJ8BVCD7tGcSpAcHXnpwp8ie785I/tw0kuFaQQlF5IpbrDU2F8ZH\n"
-            "nrAEJniEkhOWBEtQjFZaLvrcWUxT85BAKtpGR1FPbJsyo/feCBiDaeVu86TkluCiB\n"
-            "w8A/GP/8hQKBgGTepoGYskdrDmLSc5H98HuSbNUhTHj0zWSJPOYoJ2IE1WRzYf+j\n"
-            "6eV+k28HzZp3ttM8MWa8nw9EhuIB9Wpblbz7AXR5mSmsZ0aq6VVVhCOm7xzpHSbB\n"
-            "Nxf7rp7viXoueYuCxLT9YJaOOV8tWMij53x+EmeDH7Eb8+GaV+BOAXIxAoGAYbL0\n"
-            "AjG1cxAKQZ3Iz5gifKr03QEde1kbQwHvLkHZj2PW0CDkF0Ryf9cPnd1pja7W6+KI\n"
-            "TIAn1GXgUGjnFLQVLJpOzgEHH/IR5X7UsfLIpXKcKEQr6gTavDOr8O+0AX8PInaj\n"
-            "x1ZvS6FiR0Xo5Exnc0X5tDNhQZkWjf6O7e7C1LUCgYBygV2iKSslCtViFTztNhxv\n"
-            "yLFT95jNlESDnUR12oI86D0ri5WZtn9+D3WyIKjg4sV/OyWqywcYd6aOOAp9iT0k\n"
-            "lSVe25cMEXSi5WDtdi6DDhXphUaOdkFiavgdvkINrPgQ2EAqMGQspoPuv7PCTXXO\n"
-            "DWOORiinO+KNlVsLoDdThQ==\n"
-            "-----END PRIVATE KEY-----\n"
-        )
+        # Wir fügen den Key als Multi-Line String ein, exakt wie in der JSON
+        # Das r vor dem String sorgt dafür, dass Backslashes (\n) richtig interpretiert werden
+        private_key = r"-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDYewPQIsMaAReC\nX2pDzPnXDnIxvrKkUqa+FarCFdZRXETjqG9aeIsBK9h8Ath+YEgf6JoUmUEWov1l\nnKTnxSPwFnrESy0oBw/KVMeZhdN7eqbMhg03tsSlvL6wNlUk8JheJTO5cojCqoHW\nI6pe6ke5XvGpiA6zjwmH/zU8JkmoIFceh1qfkEN5+pV7X64k5Cbh4qpF9cajAHV2\nbaeZXiFzMcPP1Es4pPn/LS+cIw1h2Fqq89sdeb0y0ZiU0xVvTRmek5ULmdGYkQlx\nKvYv0ugex95fJeqtGKX8Ti9Vq6qOTOEjquWeakd48o3MWW4uCGOOgdZzZEIqwGcm\nyJZiWJGZAgMBAAECggEAH6OA9+kwtwr8Tt1XmE+rnxr5JRyQGtSKkqLziTisUUlJ\nNzWdiq0t8a6hDeTTk8rKF8HEzShl2yNYogJuFoKZQURjzm8HSz+W9vUDlAQ7V6Ni\nH+eipGcln+xxOStDr+mq9y18PQkIhFzrq2qcgpE+iNDfxG2CaotH8xShSOh2oOfO\nLosD46iLbSPqKvTZ2mPHqxAI3tXkS9XDJrU405CvdqsB/ABNJ/rgxn5Tkzexm6u+\nLuY0f5HFT26+Q+0CaH+BtcnBCNd/jlYmBBI+gic8eOEFQC6RsCVNZn8cRjn92Ulk\nH0PtQ4a7aDiFZV+NciYqle3VOJ9JKQW9QmMo2eMGJQKBgQD5YpPM2Kxx2uTmZYDz\nYfNYEMTuQDfhat9yrcVaosMt0SzIzjDvQMwOc7517fdKpUVeeqfp4ncsCLZlX3Lj\nYouw5KxwSa7U53qt7sVmoN5xI0u2hzlw+f3ZKklEeRHm96c/buiMof19CIlXt0xa\nDYWMFj15suMbbHtv+IUk3v0HBQKBgQDeOQC2TCPm2ewYRhsBJ5Cpbf/gEUtWyKlY\nx4nMGovgdA5bkJ8BVCD7tGcSpAcHXnpwp8ie785I/tw0kuFaQQlF5IpbrDU2F8ZH\nrAEJniEkhOWBEtQjFZaLvrcWUxT85BAKtpGR1FPbJsyo/feCBiDaeVu86TkluCiB\nw8A/GP/8hQKBgGTepoGYskdrDmLSc5H98HuSbNUhTHj0zWSJPOYoJ2IE1WRzYf+j\n6eV+k28HzZp3ttM8MWa8nw9EhuIB9Wpblbz7AXR5mSmsZ0aq6VVVhCOm7xzpHSbB\nNxf7rp7viXoueYuCxLT9YJaOOV8tWMij53x+EmeDH7Eb8+GaV+BOAXIxAoGAYbL0\nAjG1cxAKQZ3Iz5gifKr03QEde1kbQwHvLkHZj2PW0CDkF0Ryf9cPnd1pja7W6+KI\nTIAn1GXgUGjnFLQVLJpOzgEHH/IR5X7UsfLIpXKcKEQr6gTavDOr8O+0AX8PInaj\nx1ZvS6FiR0Xo5Exnc0X5tDNhQZkWjf6O7e7C1LUCgYBygV2iKSslCtViFTztNhxv\nyLFT95jNlESDnUR12oI86D0ri5WZtn9+D3WyIKjg4sV/OyWqywcYd6aOOAp9iT0k\nlSVe25cMEXSi5WDtdi6DDhXphUaOdkFiavgdvkINrPgQ2EAqMGQspoPuv7PCTXXO\nDWOORiinO+KNlVsLoDdThQ==\n-----END PRIVATE KEY-----\n".replace(r"\n", "\n")
 
         creds_info = {
             "type": "service_account",
             "project_id": "falldatenbank",
             "private_key_id": "eb9219c2f4b417433e68d54baa8ed80c759169a5",
-            "private_key": key_raw,
+            "private_key": private_key,
             "client_email": "falldatenbank@falldatenbank.iam.gserviceaccount.com",
             "client_id": "102942440306105394865",
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
@@ -69,8 +40,8 @@ def get_gdrive_service():
             scopes=['https://www.googleapis.com/auth/drive']
         )
         
-        # WICHTIG: Erhöhter Zeit-Puffer auf 60 Sekunden
-        creds._iat = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=60)
+        # Zeitstempel-Fix für Google
+        creds._iat = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=20)
         
         return build('drive', 'v3', credentials=creds)
     except Exception as e:
@@ -197,5 +168,6 @@ elif mode == "Verwalten":
             c.execute("DELETE FROM falle WHERE id=?", (sel['id'],))
             conn.commit()
             st.rerun()
+
 
 
