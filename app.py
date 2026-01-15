@@ -17,15 +17,38 @@ DB_NAME = "fall_archiv_cloud.db"
 @st.cache_resource
 def get_gdrive_service():
     try:
-        # Wir laden die Werte einzeln und bereinigen sie radikal
-        def clean(key):
-            return str(st.secrets[key]).strip().replace('"', '').replace("'", "")
+        import base64
+
+        def clean(key_name):
+            return str(st.secrets[key_name]).strip().replace('"', '').replace("'", "")
+
+        # Den Key vorbereiten
+        raw_key = clean("GCP_PRIVATE_KEY").replace("\\n", "\n")
+        
+        # --- AUTOMATISCHES PADDING FIX ---
+        # Falls der Key in den Secrets durch Kopieren abgeschnitten wurde
+        if "-----BEGIN PRIVATE KEY-----" in raw_key:
+            # Wir extrahieren nur den Base64-Teil zwischen den Header-Zeilen
+            lines = raw_key.split('\n')
+            header = lines[0]
+            footer = lines[-1]
+            body = "".join(lines[1:-1]).replace(" ", "").replace("\n", "")
+            
+            # Fehlendes Padding hinzufügen
+            missing_padding = len(body) % 4
+            if missing_padding:
+                body += "=" * (4 - missing_padding)
+            
+            # Key wieder zusammensetzen
+            fixed_key = f"{header}\n{body}\n{footer}\n"
+        else:
+            fixed_key = raw_key
 
         creds_info = {
             "type": clean("GCP_TYPE"),
             "project_id": clean("GCP_PROJECT_ID"),
             "private_key_id": clean("GCP_PRIVATE_KEY_ID"),
-            "private_key": clean("GCP_PRIVATE_KEY").replace("\\n", "\n"),
+            "private_key": fixed_key,
             "client_email": clean("GCP_CLIENT_EMAIL"),
             "client_id": clean("GCP_CLIENT_ID"),
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
@@ -167,6 +190,7 @@ elif mode == "Verwalten":
             c.execute("DELETE FROM falle WHERE id=?", (sel['id'],))
             conn.commit()
             st.rerun()
+
 
 
 
