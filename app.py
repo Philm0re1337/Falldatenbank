@@ -44,16 +44,22 @@ c.execute('''CREATE TABLE IF NOT EXISTS media
 conn.commit()
 
 # --- HELFERFUNKTION: UPLOAD ---
+import io
+
 def upload_to_gdrive(file, filename):
     try:
         file_metadata = {
             'name': filename,
             'parents': [GDRIVE_FOLDER_ID]
         }
-        # Datei-Inhalt vorbereiten
-        media = MediaIoBaseUpload(file, mimetype='application/octet-stream', resumable=True)
         
-        # Upload ausführen
+        # Sicherstellen, dass wir am Anfang der Datei lesen
+        file.seek(0)
+        
+        # Wir nutzen BytesIO, um den Stream für Google vorzubereiten
+        fh = io.BytesIO(file.read())
+        media = MediaIoBaseUpload(fh, mimetype='application/octet-stream', resumable=True)
+        
         gfile = drive_service.files().create(
             body=file_metadata,
             media_body=media,
@@ -62,7 +68,7 @@ def upload_to_gdrive(file, filename):
         
         file_id = gfile.get('id')
         
-        # Berechtigung setzen: Jeder mit Link kann lesen (für die Anzeige in der App)
+        # Berechtigung setzen
         drive_service.permissions().create(
             fileId=file_id,
             body={'type': 'anyone', 'role': 'reader'}
@@ -143,3 +149,4 @@ elif choice == "Übersicht & Suche":
 elif choice == "Bearbeiten & Löschen":
     # (Löschfunktion wie vorher...)
     st.write("Bearbeiten-Modus aktiv.")
+
