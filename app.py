@@ -14,22 +14,19 @@ GDRIVE_FOLDER_ID = "0B5UeXbdEo09pR1h2T0pJNmdLMUE"
 TEAM_PASSWORD = "2180"
 DB_NAME = "fall_archiv_cloud.db"
 
-# Dein Private Key als Base64 (sicher gegen Formatierungsfehler)
-B64_KEY = "LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JSUV2QUlCQURBTkJna3Foa2lHOXcwQkFRRUZBQVNDQktZd2dnU2lBZ0VBQW9JQkFRRFlld1BRSXNNYUFSZUMKWDJwRHpQblhEbklycktLUnFhK0ZhckNGZFpSWEVUanFHOWFlSXNCSzl2OEF0aCtZR2dmNkpvVW1VRVdvdjFsCm5LVG54U1B3Rm5yRVN5MG9Cdy9LVk1lWmhkTjdlcWJNaGcwM3RzU2x2TDZ3TmxVazhKaGVKVE81Y29qQ3FvSFcKSTZwZTZrZTVYdkdwaUE2emp3bUgvekU4Smttb0lGY2VoMXFma0VONSVwVjdYNjRrNUM2aDRxcEY5Y2FqQUhWMgpiYWVaWGlGek1jUFAxRXM0cFBuL0xTK2NJdzFoMkZxcTg5c2RlYjB5MFppVTExeHdUUm1lazVVTG1kR1lrUWx4Ckt2WXYwdWdleDk1ZkplcXRHS1g4VGk5VnE2cU9UT0VqcXVXZWFrZDQ4bzNNV1c0dUNHT09nZFpaWkVJcXdHY20KeUpaaVdKR1pBZ01CQUFFQ2dnRUFIOE9BOTVrd3R3cjhUdDFYbUUrcW54cjVKUnlRR3RTS2txTHppVGlzVVVsSgpOeldkaXEwdDhhNmhEZVRUazhyS0Y4SEV6U2hsMnlOWW9ndUp1Rm9LWlFVUmp6bThIU3orVzl2VURsQVE3VjZNaQpIK2VpcEdjbG4reHhPU3REcittcTl5MThQUWtJaEZ6cnEycWNncEUraU5EZnhHMkNhb3RIOHhTaFNPaDJvT2ZPCkxvc0Q0NmlMYlNQcUt2VFoybVBIcXhBSTN0WGtTOVRES3JVNDA1Q3ZkcXNCL0FCTkovcmd4bjVUa3pleG02dSsKTHVZMGY1SEZUMjYrUSswQ2FIK0J0Y25CQ05kL2psWW1CQkkrZ2ljOGVPRUZRQzZSc0NWTm5uOGNSam45MlVsawpIMFB0UTRBN2FkaUZaVitOY2lZcWxlM1ZPSjlKS1FXOVFmTW8yZU1HSlFLQmdRRDVZwFBNMkt4eDJ1VG1aWUR6CllmTllFTVR1UURmaGF0OXlyY1Zhb3NNdDBTekl6akR2UU13T2M3NTE3ZmRLcFVWZWVxZnA0bmNzQ0xa bFgzTGpZb3d2S3h3U2E3VTUzcXQ3c1Ztb041eEkwdTJoemx3K2YzWktsa0VlUkhtOWVjL2J1aU1vZjE5Q0lsWHRMnhhCkRZV01GajE1c3VNYmJIdHYrSVVrM3YwSEJRS0JnUURlT1FDMlRDUG0yZXdZUmhzQko1Q3BiZi9nRVV0V3lLbFkKeDRuTUdvdmdkQTVia0o4QlZDRDd0R2NTcEFjSFhucHA4aWU3ODVJL3R3MGt1RmFRUWxGNUlQYnJEVTJGOVpIclFFSm5pRWtoT1dCRXRRakZabEx2cmNXVXhUODVCQUt0cEdSMUZQYkpzeW8vZmVDQmlEYWVWdTg2VGtsdUNpQgp3OEEvR1AvOGhRS0JnR1RlcG9HWXNrZHJEbUxTYzVIOThIdVNiTlVoVEhqMHpXU0pQT1lvSjJJRTFXUnpZZitqCjZlVisayjhIelozdHRNOE1XYThudzlFaHVJQjlXcGJsYno3QVhSNW1TbXNaMGFxNlZWVmhDT203eHpwSFNiQgpOeGY3cnA3dmlYb3VlWXVDeExUOVlKYU9PVjh0V01pajUzK0VtZURIN0ViOCtHYVYrQk9BWEh4QW9HQUZiTDAKQWpHMWN4QUtRWjNJejVnaWZLcjAzUUVkZTF rYlF3SHZMa0haajJQVzBDRGtGMFJ5ZitjUG5kMXBqYTdXNitLSQpUSWFuMUdYZ1VHam5GTFFWTEpwb3pnRUhIL0lSNVg3VXNmTElwWEtjS0VRUjZnVGF2RE9yOE8rdEFYOFBJbmFqCngxWnZTNkZpUjBYbzVFeG5jMFg1dEROaFFaa1dqZjZPN2U3QzFMVUNnWUJ5Z1YyaUtzc2xDdFZpRlR6dE5oeHYKeUxGVDk1ak5sRVNEblVSMTJvSThkNkQwcmk1V3p0bjkrRDM1eUlLZWc0c1YvT3lXcXl3Y1lkNmFPT0FwOWlUMGsKbFNWZTkyY01FWFNpNVd0ZGk2RERoWHBoVWFPZGtGaWF2Z2R2a0lOclBnUTJFQXFNR1FzcG9QdXY3UENUWFhPCkRXT09SaWluTytLTmxWc0xvRGRUaFE9PQotLS0tLUVORCBQUklWQVRFIEtFWS0tLS0tCg=="
-
-# --- GOOGLE DRIVE VERBINDUNG ---
+# --- GOOGLE DRIVE VERBINDUNG (Direkt-Key Methode) ---
 @st.cache_resource
 def get_gdrive_service():
     try:
-        # Key aus Base64 dekodieren
-        decoded_key = base64.b64decode(B64_KEY).decode('utf-8')
-        
-        # Credential-Info direkt im Code
+        # Wir fügen den Key als Multi-Line String ein, exakt wie in der JSON
+        # Das r vor dem String sorgt dafür, dass Backslashes (\n) richtig interpretiert werden
+        private_key = r"-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDYewPQIsMaAReC\nX2pDzPnXDnIxvrKkUqa+FarCFdZRXETjqG9aeIsBK9h8Ath+YEgf6JoUmUEWov1l\nnKTnxSPwFnrESy0oBw/KVMeZhdN7eqbMhg03tsSlvL6wNlUk8JheJTO5cojCqoHW\nI6pe6ke5XvGpiA6zjwmH/zU8JkmoIFceh1qfkEN5+pV7X64k5Cbh4qpF9cajAHV2\nbaeZXiFzMcPP1Es4pPn/LS+cIw1h2Fqq89sdeb0y0ZiU0xVvTRmek5ULmdGYkQlx\nKvYv0ugex95fJeqtGKX8Ti9Vq6qOTOEjquWeakd48o3MWW4uCGOOgdZzZEIqwGcm\nyJZiWJGZAgMBAAECggEAH6OA9+kwtwr8Tt1XmE+rnxr5JRyQGtSKkqLziTisUUlJ\nNzWdiq0t8a6hDeTTk8rKF8HEzShl2yNYogJuFoKZQURjzm8HSz+W9vUDlAQ7V6Ni\nH+eipGcln+xxOStDr+mq9y18PQkIhFzrq2qcgpE+iNDfxG2CaotH8xShSOh2oOfO\nLosD46iLbSPqKvTZ2mPHqxAI3tXkS9XDJrU405CvdqsB/ABNJ/rgxn5Tkzexm6u+\nLuY0f5HFT26+Q+0CaH+BtcnBCNd/jlYmBBI+gic8eOEFQC6RsCVNZn8cRjn92Ulk\nH0PtQ4a7aDiFZV+NciYqle3VOJ9JKQW9QmMo2eMGJQKBgQD5YpPM2Kxx2uTmZYDz\nYfNYEMTuQDfhat9yrcVaosMt0SzIzjDvQMwOc7517fdKpUVeeqfp4ncsCLZlX3Lj\nYouw5KxwSa7U53qt7sVmoN5xI0u2hzlw+f3ZKklEeRHm96c/buiMof19CIlXt0xa\nDYWMFj15suMbbHtv+IUk3v0HBQKBgQDeOQC2TCPm2ewYRhsBJ5Cpbf/gEUtWyKlY\nx4nMGovgdA5bkJ8BVCD7tGcSpAcHXnpwp8ie785I/tw0kuFaQQlF5IpbrDU2F8ZH\nrAEJniEkhOWBEtQjFZaLvrcWUxT85BAKtpGR1FPbJsyo/feCBiDaeVu86TkluCiB\nw8A/GP/8hQKBgGTepoGYskdrDmLSc5H98HuSbNUhTHj0zWSJPOYoJ2IE1WRzYf+j\n6eV+k28HzZp3ttM8MWa8nw9EhuIB9Wpblbz7AXR5mSmsZ0aq6VVVhCOm7xzpHSbB\nNxf7rp7viXoueYuCxLT9YJaOOV8tWMij53x+EmeDH7Eb8+GaV+BOAXIxAoGAYbL0\nAjG1cxAKQZ3Iz5gifKr03QEde1kbQwHvLkHZj2PW0CDkF0Ryf9cPnd1pja7W6+KI\nTIAn1GXgUGjnFLQVLJpOzgEHH/IR5X7UsfLIpXKcKEQr6gTavDOr8O+0AX8PInaj\nx1ZvS6FiR0Xo5Exnc0X5tDNhQZkWjf6O7e7C1LUCgYBygV2iKSslCtViFTztNhxv\nyLFT95jNlESDnUR12oI86D0ri5WZtn9+D3WyIKjg4sV/OyWqywcYd6aOOAp9iT0k\nlSVe25cMEXSi5WDtdi6DDhXphUaOdkFiavgdvkINrPgQ2EAqMGQspoPuv7PCTXXO\nDWOORiinO+KNlVsLoDdThQ==\n-----END PRIVATE KEY-----\n".replace(r"\n", "\n")
+
         creds_info = {
             "type": "service_account",
             "project_id": "falldatenbank",
             "private_key_id": "eb9219c2f4b417433e68d54baa8ed80c759169a5",
-            "private_key": decoded_key,
+            "private_key": private_key,
             "client_email": "falldatenbank@falldatenbank.iam.gserviceaccount.com",
             "client_id": "102942440306105394865",
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
@@ -43,13 +40,12 @@ def get_gdrive_service():
             scopes=['https://www.googleapis.com/auth/drive']
         )
         
-        # ZEIT-FIX: Verhindert 'invalid_grant' durch Serverzeit-Unterschiede
+        # Zeitstempel-Fix für Google
         creds._iat = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=20)
         
-        service = build('drive', 'v3', credentials=creds)
-        return service
+        return build('drive', 'v3', credentials=creds)
     except Exception as e:
-        st.error(f"❌ Kritischer Verbindungsfehler: {e}")
+        st.error(f"❌ Verbindungsfehler: {e}")
         return None
 
 drive_service = get_gdrive_service()
@@ -172,3 +168,4 @@ elif mode == "Verwalten":
             c.execute("DELETE FROM falle WHERE id=?", (sel['id'],))
             conn.commit()
             st.rerun()
+
