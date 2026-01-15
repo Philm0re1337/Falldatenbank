@@ -14,55 +14,30 @@ TEAM_PASSWORD = "2180"
 DB_NAME = "fall_archiv_cloud.db"
 
 # --- GOOGLE DRIVE VERBINDUNG (FEHLERTOLERANT) ---
+import json
+
 @st.cache_resource
 def get_gdrive_service():
     try:
-        import base64
-
-        def clean(key_name):
-            return str(st.secrets[key_name]).strip().replace('"', '').replace("'", "")
-
-        # Den Key vorbereiten
-        raw_key = clean("GCP_PRIVATE_KEY").replace("\\n", "\n")
+        # Den gesamten String aus den Secrets laden
+        json_string = st.secrets["gcp_service_account"]["json_data"]
         
-        # --- AUTOMATISCHES PADDING FIX ---
-        # Falls der Key in den Secrets durch Kopieren abgeschnitten wurde
-        if "-----BEGIN PRIVATE KEY-----" in raw_key:
-            # Wir extrahieren nur den Base64-Teil zwischen den Header-Zeilen
-            lines = raw_key.split('\n')
-            header = lines[0]
-            footer = lines[-1]
-            body = "".join(lines[1:-1]).replace(" ", "").replace("\n", "")
-            
-            # Fehlendes Padding hinzufügen
-            missing_padding = len(body) % 4
-            if missing_padding:
-                body += "=" * (4 - missing_padding)
-            
-            # Key wieder zusammensetzen
-            fixed_key = f"{header}\n{body}\n{footer}\n"
-        else:
-            fixed_key = raw_key
+        # In ein echtes Python-Dictionary umwandeln
+        creds_info = json.loads(json_string)
+        
+        # Sicherstellen, dass der Private Key korrekt formatiert ist
+        if "private_key" in creds_info:
+            creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
 
-        creds_info = {
-            "type": clean("GCP_TYPE"),
-            "project_id": clean("GCP_PROJECT_ID"),
-            "private_key_id": clean("GCP_PRIVATE_KEY_ID"),
-            "private_key": fixed_key,
-            "client_email": clean("GCP_CLIENT_EMAIL"),
-            "client_id": clean("GCP_CLIENT_ID"),
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-            "client_x509_cert_url": f"https://www.googleapis.com/robot/v1/metadata/x509/{clean('GCP_CLIENT_EMAIL').replace('@', '%40')}"
-        }
-
+        # Credentials erstellen
         creds = service_account.Credentials.from_service_account_info(
             creds_info, 
             scopes=['https://www.googleapis.com/auth/drive']
         )
         
+        # Zeit-Sync
         creds._iat = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=30)
+        
         return build('drive', 'v3', credentials=creds)
     except Exception as e:
         st.error(f"❌ Kritischer Verbindungsfehler: {e}")
@@ -190,6 +165,7 @@ elif mode == "Verwalten":
             c.execute("DELETE FROM falle WHERE id=?", (sel['id'],))
             conn.commit()
             st.rerun()
+
 
 
 
