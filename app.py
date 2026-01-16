@@ -56,8 +56,11 @@ st.set_page_config(page_title="Fall-Archiv Pro", layout="wide")
 # --- AUTHENTIFIZIERUNG ---
 if "auth" not in st.session_state:
     st.title("🔒 Team Login")
-    pwd = st.text_input("Passwort eingeben", type="password")
-    if st.button("Anmelden"):
+    # Durch die Verwendung von on_change oder einfach der Prüfung des Rückgabewerts 
+    # kann man Enter nutzen, ohne explizit auf einen Button zu klicken.
+    pwd = st.text_input("Passwort eingeben und Enter drücken", type="password")
+    
+    if pwd: # Wenn etwas eingegeben und Enter gedrückt wurde
         if pwd == TEAM_PASSWORD:
             st.session_state["auth"] = True
             st.rerun()
