@@ -7,6 +7,11 @@ import os
 # --- KONFIGURATION ---
 DB_NAME = "fall_archiv_lokal.db"
 TEAM_PASSWORD = "2180"
+UPLOAD_FOLDER = "uploads"
+
+# Verzeichnis für Uploads erstellen, falls nicht vorhanden
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
 
 # --- DATENBANK FUNKTIONEN ---
 def get_db_connection():
@@ -16,21 +21,20 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
-    # Tabelle für die Fälle
+    # Erweitert um Spalten für Medien (als Text-Pfade)
     c.execute('''CREATE TABLE IF NOT EXISTS falle 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, 
                   fall_nummer TEXT, 
                   datum DATE, 
                   beschreibung TEXT, 
-                  erledigt INTEGER DEFAULT 0)''')
+                  medien_pfade TEXT)''')
     conn.commit()
     conn.close()
 
-# Datenbank initialisieren
 init_db()
 
-# --- UI KONFIGURATION ---
-st.set_page_config(page_title="Lokales Fall-Archiv", layout="wide")
+# --- UI SETTINGS ---
+st.set_page_config(page_title="Fall-Archiv Pro", layout="wide")
 
 # --- AUTHENTIFIZIERUNG ---
 if "auth" not in st.session_state:
@@ -45,61 +49,114 @@ if "auth" not in st.session_state:
     st.stop()
 
 # --- NAVIGATION ---
-st.sidebar.title("Navigation")
-mode = st.sidebar.radio("Gehe zu:", ["Übersicht", "Neuanlage"])
+mode = st.sidebar.radio("Navigation", ["Übersicht", "Neuanlage", "Daten-Backup"])
+
+# --- FUNKTION: DATEIEN SPEICHERN ---
+def save_uploaded_files(files):
+    filenames = []
+    for f in files:
+        f_path = os.path.join(UPLOAD_FOLDER, f.name)
+        with open(f_path, "wb") as buffer:
+            buffer.write(f.getbuffer())
+        filenames.append(f.name)
+    return ",".join(filenames)
 
 # --- NEUANLAGE ---
 if mode == "Neuanlage":
     st.header("➕ Neuen Fall anlegen")
-    
-    with st.form("neuer_fall", clear_on_submit=True):
-        fnr = st.text_input("Fall-Nummer / Kennung")
+    with st.form("form_neu", clear_on_submit=True):
+        fnr = st.text_input("Fall-Nummer")
         fdat = st.date_input("Datum", datetime.date.today())
-        fbes = st.text_area("Fallbeschreibung")
+        fbes = st.text_area("Beschreibung")
+        files = st.file_uploader("Bilder & Videos hochladen", accept_multiple_files=True, type=["jpg","png","mp4","mov"])
         
-        submit = st.form_submit_button("Speichern")
-        
-        if submit:
+        if st.form_submit_button("Speichern"):
             if fnr and fbes:
+                m_pfade = save_uploaded_files(files) if files else ""
                 conn = get_db_connection()
                 c = conn.cursor()
-                c.execute("INSERT INTO falle (fall_nummer, datum, beschreibung) VALUES (?, ?, ?)", 
-                          (fnr, fdat, fbes))
+                c.execute("INSERT INTO falle (fall_nummer, datum, beschreibung, medien_pfade) VALUES (?, ?, ?, ?)", 
+                          (fnr, fdat, fbes, m_pfade))
                 conn.commit()
                 conn.close()
-                st.success(f"Fall {fnr} wurde lokal gespeichert!")
+                st.success(f"Fall {fnr} wurde angelegt!")
             else:
-                st.warning("Bitte füllen Sie alle Felder aus.")
+                st.warning("Bitte Pflichtfelder ausfüllen.")
 
-# --- ÜBERSICHT ---
+# --- ÜBERSICHT (MIT EDIT & DELETE) ---
 elif mode == "Übersicht":
     st.header("📂 Archivierte Fälle")
-    
     conn = get_db_connection()
     df = pd.read_sql_query("SELECT * FROM falle ORDER BY datum DESC", conn)
     conn.close()
-    
-    if df.empty:
-        st.info("Noch keine Fälle im Archiv vorhanden.")
-    else:
-        # Suche/Filter
-        search = st.text_input("🔍 Fall suchen (Nummer oder Beschreibung)")
-        if search:
-            df = df[df['fall_nummer'].str.contains(search, case=False) | 
-                    df['beschreibung'].str.contains(search, case=False)]
 
-        # Anzeige der Fälle in Kartenform
-        for _, row in df.iterrows():
-            with st.container(border=True):
-                st.subheader(f"Fall: {row['fall_nummer']}")
-                st.write(f"📅 **Datum:** {row['datum']}")
-                st.write(f"📝 **Beschreibung:** {row['beschreibung']}")
-                
-                # Button zum Löschen (Optional)
-                if st.button(f"Löschen #{row['id']}", key=f"del_{row['id']}"):
-                    conn = get_db_connection()
-                    c = conn.cursor()
-                    c.execute("DELETE FROM falle WHERE id = ?", (row['id'],))
-                    conn.commit()
-                    conn.close()
-                    st.rerun()
+    if df.empty:
+        st.info("Keine Fälle vorhanden.")
+    else:
+        for index, row in df.iterrows():
+            with st.expander(f"📌 Fall: {row['fall_nummer']} ({row['datum']})"):
+                # Anzeige Modus
+                if f"edit_{row['id']}" not in st.session_state:
+                    st.write(f"**Beschreibung:** {row['beschreibung']}")
+                    
+                    # Medien anzeigen
+                    if row['medien_pfade']:
+                        st.write("---")
+                        st.write("**Anhänge:**")
+                        cols = st.columns(3)
+                        files = row['medien_pfade'].split(",")
+                        for i, f_name in enumerate(files):
+                            p = os.path.join(UPLOAD_FOLDER, f_name)
+                            if os.path.exists(p):
+                                with cols[i % 3]:
+                                    if f_name.lower().endswith(('.mp4', '.mov')):
+                                        st.video(p)
+                                    else:
+                                        st.image(p, caption=f_name)
+
+                    # Buttons für Aktionen
+                    c1, c2, _ = st.columns([1,1,4])
+                    if c1.button("Bearbeiten", key=f"btn_ed_{row['id']}"):
+                        st.session_state[f"edit_{row['id']}"] = True
+                        st.rerun()
+                    
+                    if c2.button("Löschen", key=f"btn_del_{row['id']}", type="primary"):
+                        conn = get_db_connection()
+                        c = conn.cursor()
+                        c.execute("DELETE FROM falle WHERE id = ?", (row['id'],))
+                        conn.commit()
+                        conn.close()
+                        st.success("Gelöscht!")
+                        st.rerun()
+
+                # Bearbeiten Modus
+                else:
+                    st.write("### Fall bearbeiten")
+                    new_fnr = st.text_input("Fall-Nummer", row['fall_nummer'], key=f"inf_{row['id']}")
+                    new_bes = st.text_area("Beschreibung", row['beschreibung'], key=f"ibes_{row['id']}")
+                    
+                    bc1, bc2 = st.columns(2)
+                    if bc1.button("Änderungen speichern", key=f"save_{row['id']}"):
+                        conn = get_db_connection()
+                        c = conn.cursor()
+                        c.execute("UPDATE falle SET fall_nummer = ?, beschreibung = ? WHERE id = ?", 
+                                  (new_fnr, new_bes, row['id']))
+                        conn.commit()
+                        conn.close()
+                        del st.session_state[f"edit_{row['id']}"]
+                        st.rerun()
+                    
+                    if bc2.button("Abbrechen", key=f"can_{row['id']}"):
+                        del st.session_state[f"edit_{row['id']}"]
+                        st.rerun()
+
+# --- BACKUP ---
+elif mode == "Daten-Backup":
+    st.header("💾 Datensicherung")
+    conn = get_db_connection()
+    df = pd.read_sql_query("SELECT * FROM falle", conn)
+    conn.close()
+    
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button("Als CSV (Excel) exportieren", data=csv, file_name="fall_archiv_backup.csv", mime="text/csv")
+    st.write("Nutze diesen Button regelmäßig, um deine Daten lokal zu sichern.")
