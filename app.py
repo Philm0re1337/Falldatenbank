@@ -60,7 +60,7 @@ if "auth" not in st.session_state:
     st.stop()
 
 # --- NAVIGATION ---
-mode = st.sidebar.radio("Navigation", ["Übersicht", "Neuanlage", "Daten-Backup"])
+mode = st.sidebar.radio("Navigation", ["Übersicht", "Neuanlage"])
 
 # --- FUNKTION: DATEIEN SPEICHERN ---
 def save_uploaded_files(files):
@@ -152,7 +152,7 @@ elif mode == "Übersicht":
                     st.write(f"📝 {row['beschreibung'][:200]}..." if len(row['beschreibung']) > 200 else f"📝 {row['beschreibung']}")
                     
                     # Details-Expander
-                    with st.expander("Details & Medien"):
+                    with st.expander("Details & Verwaltung"):
                         if f"edit_{row['id']}" not in st.session_state:
                             st.write(f"**Vollständige Beschreibung:**\n{row['beschreibung']}")
                             
@@ -171,49 +171,43 @@ elif mode == "Übersicht":
                                             else:
                                                 st.image(p, caption=f_name)
                             
-                            # Buttons
+                            # Aktions-Buttons
+                            st.write("---")
                             c1, c2, _ = st.columns([1, 1, 4])
-                            if c1.button("Bearbeiten", key=f"btn_ed_{row['id']}"):
+                            if c1.button("Fall bearbeiten", key=f"btn_ed_{row['id']}"):
                                 st.session_state[f"edit_{row['id']}"] = True
                                 st.rerun()
                             
-                            if c2.button("Löschen", key=f"btn_del_{row['id']}", type="primary"):
+                            if c2.button("Fall löschen", key=f"btn_del_{row['id']}", type="primary"):
                                 conn = get_db_connection()
                                 c = conn.cursor()
                                 c.execute("DELETE FROM falle WHERE id = ?", (row['id'],))
                                 conn.commit()
                                 conn.close()
-                                st.success("Fall gelöscht!")
+                                st.success("Fall wurde dauerhaft gelöscht!")
                                 st.rerun()
                         
-                        # Bearbeiten Modus innerhalb des Expanders
+                        # Bearbeiten Modus
                         else:
-                            st.write("### Fall bearbeiten")
-                            new_fnr = st.text_input("Fall-Nummer", row['fall_nummer'], key=f"inf_{row['id']}")
-                            new_bes = st.text_area("Beschreibung", row['beschreibung'], key=f"ibes_{row['id']}")
-                            
-                            bc1, bc2 = st.columns(2)
-                            if bc1.button("Speichern", key=f"save_{row['id']}"):
-                                conn = get_db_connection()
-                                c = conn.cursor()
-                                c.execute("UPDATE falle SET fall_nummer = ?, beschreibung = ? WHERE id = ?", 
-                                          (new_fnr, new_bes, row['id']))
-                                conn.commit()
-                                conn.close()
-                                del st.session_state[f"edit_{row['id']}"]
-                                st.rerun()
-                            
-                            if bc2.button("Abbrechen", key=f"can_{row['id']}"):
-                                del st.session_state[f"edit_{row['id']}"]
-                                st.rerun()
-
-# --- BACKUP ---
-elif mode == "Daten-Backup":
-    st.header("💾 Datensicherung")
-    conn = get_db_connection()
-    df = pd.read_sql_query("SELECT * FROM falle", conn)
-    conn.close()
-    
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.download_button("Als CSV (Excel) exportieren", data=csv, file_name="fall_archiv_backup.csv", mime="text/csv")
-    st.info("Hinweis: Bilder/Videos müssen manuell vom Server gesichert werden.")
+                            st.write("### 📝 Fall bearbeiten")
+                            with st.form(key=f"edit_form_{row['id']}"):
+                                new_fnr = st.text_input("Fall-Nummer", row['fall_nummer'])
+                                new_dat = st.date_input("Datum", datetime.datetime.strptime(row['datum'], '%Y-%m-%d').date() if isinstance(row['datum'], str) else row['datum'])
+                                new_bes = st.text_area("Beschreibung", row['beschreibung'])
+                                
+                                bc1, bc2, _ = st.columns([1, 1, 2])
+                                if bc1.form_submit_button("Änderungen speichern"):
+                                    conn = get_db_connection()
+                                    c = conn.cursor()
+                                    c.execute("UPDATE falle SET fall_nummer = ?, datum = ?, beschreibung = ? WHERE id = ?", 
+                                              (new_fnr, new_dat, new_bes, row['id']))
+                                    conn.commit()
+                                    conn.close()
+                                    del st.session_state[f"edit_{row['id']}"]
+                                    st.success("Änderungen gespeichert!")
+                                    st.rerun()
+                                
+                                if bc2.form_submit_button("Abbrechen"):
+                                    del st.session_state[f"edit_{row['id']}"]
+                                    st.rerun()
+                                
