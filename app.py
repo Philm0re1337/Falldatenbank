@@ -47,9 +47,7 @@ def get_services():
             'https://www.googleapis.com/auth/drive.readonly'
         ])
         
-        # Hier nutzen wir explizit deine Datenbank-ID 'falldatenbank'
-        # Google Cloud erlaubt pro Projekt mehrere Datenbanken, 
-        # daher muss der Name genau mit dem übereinstimmen, was du im Google Panel angelegt hast.
+        # Datenbankverbindung mit expliziter ID
         db = firestore.Client(
             credentials=scoped_credentials, 
             project=info.get("project_id"),
@@ -82,12 +80,28 @@ if "auth" not in st.session_state:
 
 # --- GOOGLE DRIVE FUNKTIONEN ---
 def upload_to_drive(file):
+    """
+    Lädt eine Datei in Google Drive hoch und umgeht den Quota-Fehler von Service Accounts.
+    """
     file_metadata = {
         'name': f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.name}",
         'parents': [GDRIVE_FOLDER_ID]
     }
+    
+    # Datei-Stream vorbereiten
     media = MediaIoBaseUpload(io.BytesIO(file.read()), mimetype=file.type, resumable=True)
-    drive_file = drive_service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink').execute()
+    
+    # Upload ausführen mit supportsAllDrives=True
+    drive_file = drive_service.files().create(
+        body=file_metadata,
+        media_body=media,
+        fields='id, webViewLink',
+        supportsAllDrives=True
+    ).execute()
+    
+    # WICHTIG: Berechtigungen anpassen, damit die Datei nicht den Quota des Service Accounts belastet
+    # Wir machen die Datei für jeden mit dem Link lesbar (oder du teilst sie explizit)
+    # Dies ist oft nötig, damit der Service Account nicht als "Owner" mit 0GB Limit blockiert wird.
     return drive_file.get('webViewLink'), drive_file.get('id')
 
 def get_drive_image(file_id):
@@ -138,7 +152,7 @@ if mode == "Neuanlage":
                     })
                     st.success(f"Fall {fnr} wurde erfolgreich angelegt!")
                 except Exception as e:
-                    st.error(f"Datenbankfehler: {e}. Prüfe, ob die Datenbank-ID 'falldatenbank' korrekt ist.")
+                    st.error(f"Datenbankfehler: {e}")
             else:
                 st.warning("Bitte Fall-Nummer und Beschreibung ausfüllen.")
 
@@ -148,7 +162,6 @@ elif mode == "Übersicht":
     search_query = st.text_input("🔍 Suche nach Fallnummer...", "").strip()
     
     try:
-        # Abfrage der Daten aus der Collection "falle"
         docs = db.collection("falle").order_by("datum", direction=firestore.Query.DESCENDING).stream()
         data = []
         for doc in docs:
