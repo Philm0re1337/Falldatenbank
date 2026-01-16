@@ -3,6 +3,7 @@ import pandas as pd
 import sqlite3
 import datetime
 import os
+import re
 
 # --- KONFIGURATION ---
 DB_NAME = "fall_archiv_lokal.db"
@@ -15,22 +16,20 @@ if not os.path.exists(UPLOAD_FOLDER):
 
 # --- DATENBANK FUNKTIONEN ---
 def get_db_connection():
-    # Wir nutzen einen absoluten Pfad, um Schreibrechte-Probleme zu minimieren
     db_path = os.path.join(os.getcwd(), DB_NAME)
     return sqlite3.connect(db_path, check_same_thread=False)
 
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
-    # 1. Basis-Tabelle erstellen
+    # Basis-Tabelle erstellen
     c.execute('''CREATE TABLE IF NOT EXISTS falle 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, 
                   fall_nummer TEXT, 
                   datum DATE, 
                   beschreibung TEXT)''')
     
-    # 2. SPALTEN-CHECK (Reparatur-Logik)
-    # Wir prüfen, ob 'medien_pfade' existiert, falls nicht -> hinzufügen
+    # Spalten-Check für medien_pfade
     c.execute("PRAGMA table_info(falle)")
     columns = [column[1] for column in c.fetchall()]
     if 'medien_pfade' not in columns:
@@ -43,7 +42,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-# Initialisierung aufrufen
 init_db()
 
 # --- UI SETTINGS ---
@@ -68,10 +66,12 @@ mode = st.sidebar.radio("Navigation", ["Übersicht", "Neuanlage", "Daten-Backup"
 def save_uploaded_files(files):
     filenames = []
     for f in files:
-        f_path = os.path.join(UPLOAD_FOLDER, f.name)
+        # Dateiname säubern (Leerzeichen entfernen)
+        clean_name = re.sub(r'[^a-zA-Z0-9.-]', '_', f.name)
+        f_path = os.path.join(UPLOAD_FOLDER, clean_name)
         with open(f_path, "wb") as buffer:
             buffer.write(f.getbuffer())
-        filenames.append(f.name)
+        filenames.append(clean_name)
     return ",".join(filenames)
 
 # --- NEUANLAGE ---
@@ -81,7 +81,7 @@ if mode == "Neuanlage":
         fnr = st.text_input("Fall-Nummer")
         fdat = st.date_input("Datum", datetime.date.today())
         fbes = st.text_area("Beschreibung")
-        files = st.file_uploader("Bilder & Videos hochladen", accept_multiple_files=True, type=["jpg","png","mp4","mov"])
+        files = st.file_uploader("Bilder & Videos hochladen", accept_multiple_files=True, type=["jpg","png","jpeg","mp4","mov"])
         
         if st.form_submit_button("Speichern"):
             if fnr and fbes:
@@ -94,74 +94,118 @@ if mode == "Neuanlage":
                 conn.close()
                 st.success(f"Fall {fnr} wurde angelegt!")
             else:
-                st.warning("Bitte Pflichtfelder ausfüllen.")
+                st.warning("Bitte Pflichtfelder (Nummer & Beschreibung) ausfüllen.")
 
-# --- ÜBERSICHT (MIT EDIT & DELETE) ---
+# --- ÜBERSICHT ---
 elif mode == "Übersicht":
     st.header("📂 Archivierte Fälle")
+    
+    # Suchfunktion
+    search_query = st.text_input("🔍 Suche nach Fallnummer oder Stichworten", "").strip()
+    
     conn = get_db_connection()
+    # Daten laden
     df = pd.read_sql_query("SELECT * FROM falle ORDER BY datum DESC", conn)
     conn.close()
 
     if df.empty:
-        st.info("Keine Fälle vorhanden.")
+        st.info("Keine Fälle im Archiv vorhanden.")
     else:
+        # Filter anwenden, falls Suche aktiv
+        if search_query:
+            df = df[
+                df['fall_nummer'].str.contains(search_query, case=False, na=False) | 
+                df['beschreibung'].str.contains(search_query, case=False, na=False)
+            ]
+
+        if df.empty:
+            st.warning("Keine Treffer für deine Suche.")
+        
         for index, row in df.iterrows():
-            with st.expander(f"📌 Fall: {row['fall_nummer']} ({row['datum']})"):
-                # Anzeige Modus
-                if f"edit_{row['id']}" not in st.session_state:
-                    st.write(f"**Beschreibung:** {row['beschreibung']}")
-                    
-                    # Medien anzeigen
+            # Container für jeden Fall
+            with st.container(border=True):
+                col_thumb, col_info = st.columns([1, 4])
+                
+                # --- SPALTE 1: VORSCHAU ---
+                with col_thumb:
+                    first_img = None
                     if row['medien_pfade']:
-                        st.write("---")
-                        st.write("**Anhänge:**")
-                        cols = st.columns(3)
-                        files = row['medien_pfade'].split(",")
-                        for i, f_name in enumerate(files):
-                            p = os.path.join(UPLOAD_FOLDER, f_name)
-                            if os.path.exists(p):
-                                with cols[i % 3]:
-                                    if f_name.lower().endswith(('.mp4', '.mov')):
-                                        st.video(p)
-                                    else:
-                                        st.image(p, caption=f_name)
+                        all_files = row['medien_pfade'].split(",")
+                        # Suche das erste Bild in den Anhängen
+                        for f_name in all_files:
+                            if f_name.lower().endswith(('.jpg', '.jpeg', '.png')):
+                                p = os.path.join(UPLOAD_FOLDER, f_name)
+                                if os.path.exists(p):
+                                    first_img = p
+                                    break
+                    
+                    if first_img:
+                        st.image(first_img, use_container_width=True)
+                    else:
+                        # Platzhalter, falls kein Bild vorhanden ist
+                        st.info("Kein Bild")
 
-                    # Buttons für Aktionen
-                    c1, c2, _ = st.columns([1,1,4])
-                    if c1.button("Bearbeiten", key=f"btn_ed_{row['id']}"):
-                        st.session_state[f"edit_{row['id']}"] = True
-                        st.rerun()
+                # --- SPALTE 2: INFO ---
+                with col_info:
+                    st.subheader(f"Fall: {row['fall_nummer']}")
+                    st.write(f"📅 **Datum:** {row['datum']}")
+                    st.write(f"📝 {row['beschreibung'][:200]}..." if len(row['beschreibung']) > 200 else f"📝 {row['beschreibung']}")
                     
-                    if c2.button("Löschen", key=f"btn_del_{row['id']}", type="primary"):
-                        conn = get_db_connection()
-                        c = conn.cursor()
-                        c.execute("DELETE FROM falle WHERE id = ?", (row['id'],))
-                        conn.commit()
-                        conn.close()
-                        st.success("Gelöscht!")
-                        st.rerun()
-
-                # Bearbeiten Modus
-                else:
-                    st.write("### Fall bearbeiten")
-                    new_fnr = st.text_input("Fall-Nummer", row['fall_nummer'], key=f"inf_{row['id']}")
-                    new_bes = st.text_area("Beschreibung", row['beschreibung'], key=f"ibes_{row['id']}")
-                    
-                    bc1, bc2 = st.columns(2)
-                    if bc1.button("Änderungen speichern", key=f"save_{row['id']}"):
-                        conn = get_db_connection()
-                        c = conn.cursor()
-                        c.execute("UPDATE falle SET fall_nummer = ?, beschreibung = ? WHERE id = ?", 
-                                  (new_fnr, new_bes, row['id']))
-                        conn.commit()
-                        conn.close()
-                        del st.session_state[f"edit_{row['id']}"]
-                        st.rerun()
-                    
-                    if bc2.button("Abbrechen", key=f"can_{row['id']}"):
-                        del st.session_state[f"edit_{row['id']}"]
-                        st.rerun()
+                    # Details-Expander
+                    with st.expander("Details & Medien"):
+                        if f"edit_{row['id']}" not in st.session_state:
+                            st.write(f"**Vollständige Beschreibung:**\n{row['beschreibung']}")
+                            
+                            # Alle Medien anzeigen
+                            if row['medien_pfade']:
+                                st.write("---")
+                                st.write("**Anhänge:**")
+                                m_cols = st.columns(3)
+                                files = row['medien_pfade'].split(",")
+                                for i, f_name in enumerate(files):
+                                    p = os.path.join(UPLOAD_FOLDER, f_name)
+                                    if os.path.exists(p):
+                                        with m_cols[i % 3]:
+                                            if f_name.lower().endswith(('.mp4', '.mov')):
+                                                st.video(p)
+                                            else:
+                                                st.image(p, caption=f_name)
+                            
+                            # Buttons
+                            c1, c2, _ = st.columns([1, 1, 4])
+                            if c1.button("Bearbeiten", key=f"btn_ed_{row['id']}"):
+                                st.session_state[f"edit_{row['id']}"] = True
+                                st.rerun()
+                            
+                            if c2.button("Löschen", key=f"btn_del_{row['id']}", type="primary"):
+                                conn = get_db_connection()
+                                c = conn.cursor()
+                                c.execute("DELETE FROM falle WHERE id = ?", (row['id'],))
+                                conn.commit()
+                                conn.close()
+                                st.success("Fall gelöscht!")
+                                st.rerun()
+                        
+                        # Bearbeiten Modus innerhalb des Expanders
+                        else:
+                            st.write("### Fall bearbeiten")
+                            new_fnr = st.text_input("Fall-Nummer", row['fall_nummer'], key=f"inf_{row['id']}")
+                            new_bes = st.text_area("Beschreibung", row['beschreibung'], key=f"ibes_{row['id']}")
+                            
+                            bc1, bc2 = st.columns(2)
+                            if bc1.button("Speichern", key=f"save_{row['id']}"):
+                                conn = get_db_connection()
+                                c = conn.cursor()
+                                c.execute("UPDATE falle SET fall_nummer = ?, beschreibung = ? WHERE id = ?", 
+                                          (new_fnr, new_bes, row['id']))
+                                conn.commit()
+                                conn.close()
+                                del st.session_state[f"edit_{row['id']}"]
+                                st.rerun()
+                            
+                            if bc2.button("Abbrechen", key=f"can_{row['id']}"):
+                                del st.session_state[f"edit_{row['id']}"]
+                                st.rerun()
 
 # --- BACKUP ---
 elif mode == "Daten-Backup":
@@ -172,5 +216,4 @@ elif mode == "Daten-Backup":
     
     csv = df.to_csv(index=False).encode('utf-8')
     st.download_button("Als CSV (Excel) exportieren", data=csv, file_name="fall_archiv_backup.csv", mime="text/csv")
-    st.write("Nutze diesen Button regelmäßig, um deine Daten lokal zu sichern.")
-
+    st.info("Hinweis: Bilder/Videos müssen manuell vom Server gesichert werden.")
