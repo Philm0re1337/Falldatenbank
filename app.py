@@ -4,17 +4,32 @@ import datetime
 import os
 import re
 import json
-from google.cloud import firestore
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 import io
 
+# Wir versuchen die Bibliotheken zu importieren. 
+# Falls sie fehlen, geben wir eine klare Anweisung für die requirements.txt aus.
+try:
+    from google.cloud import firestore
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
+except ImportError:
+    st.error("🚨 Fehlende Bibliotheken erkannt!")
+    st.info("""
+    Bitte stelle sicher, dass eine Datei namens **requirements.txt** in deinem GitHub-Repository liegt, die folgenden Inhalt hat:
+    
+    ```
+    google-cloud-firestore
+    google-api-python-client
+    google-auth
+    pandas
+    ```
+    """)
+    st.stop()
+
 # --- KONFIGURATION & INITIALISIERUNG ---
-# Den Inhalt der hochgeladenen JSON-Datei bitte in Streamlit unter Secrets -> FIREBASE_JSON einfügen
 firebase_info = st.secrets.get("FIREBASE_JSON")
 TEAM_PASSWORD = "2180"
-# Die ID deines Google Drive Ordners: 0B5UeXbdEo09pR1h2T0pJNmdLMUE
 GDRIVE_FOLDER_ID = st.secrets.get("GDRIVE_FOLDER_ID", "0B5UeXbdEo09pR1h2T0pJNmdLMUE") 
 
 @st.cache_resource
@@ -27,7 +42,6 @@ def get_services():
         info = json.loads(firebase_info)
         credentials = service_account.Credentials.from_service_account_info(info)
         
-        # Scopes für Firestore und Drive
         scoped_credentials = credentials.with_scopes([
             'https://www.googleapis.com/auth/cloud-platform',
             'https://www.googleapis.com/auth/drive.file',
@@ -132,58 +146,60 @@ elif mode == "Übersicht":
     search_query = st.text_input("🔍 Suche nach Fallnummer...", "").strip()
     
     # Daten abrufen
-    docs = db.collection("falle").order_by("datum", direction=firestore.Query.DESCENDING).stream()
-    data = []
-    for doc in docs:
-        d = doc.to_dict()
-        d['id'] = doc.id
-        data.append(d)
-    
-    if not data:
-        st.info("Noch keine Fälle im Archiv.")
-    else:
-        df = pd.DataFrame(data)
-        if search_query:
-            df = df[df['fall_nummer'].str.contains(search_query, case=False, na=False)]
+    try:
+        docs = db.collection("falle").order_by("datum", direction=firestore.Query.DESCENDING).stream()
+        data = []
+        for doc in docs:
+            d = doc.to_dict()
+            d['id'] = doc.id
+            data.append(d)
+        
+        if not data:
+            st.info("Noch keine Fälle im Archiv.")
+        else:
+            df = pd.DataFrame(data)
+            if search_query:
+                df = df[df['fall_nummer'].str.contains(search_query, case=False, na=False)]
 
-        for _, row in df.iterrows():
-            with st.container(border=True):
-                c1, c2, c3 = st.columns([2, 4, 1])
-                
-                with c1:
-                    medien = row.get('medien', [])
-                    if medien and "image" in medien[0]['type']:
-                        img_data = get_drive_image(medien[0]['id'])
-                        if img_data:
-                            st.image(img_data, use_container_width=True)
-                    else:
-                        st.write("📁 Keine Vorschau")
+            for _, row in df.iterrows():
+                with st.container(border=True):
+                    c1, c2, c3 = st.columns([2, 4, 1])
+                    
+                    with c1:
+                        medien = row.get('medien', [])
+                        if medien and "image" in medien[0]['type']:
+                            img_data = get_drive_image(medien[0]['id'])
+                            if img_data:
+                                st.image(img_data, use_container_width=True)
+                        else:
+                            st.write("📁 Keine Vorschau")
 
-                with c2:
-                    st.subheader(f"Fall {row['fall_nummer']}")
-                    st.write(f"📅 {row['datum']} | Status: **{row['status']}**")
-                    st.write(row['beschreibung'][:150] + "...")
+                    with c2:
+                        st.subheader(f"Fall {row['fall_nummer']}")
+                        st.write(f"📅 {row['datum']} | Status: **{row['status']}**")
+                        st.write(row['beschreibung'][:150] + "...")
 
-                with c3:
-                    if st.button("Details", key=f"btn_{row['id']}"):
-                        st.session_state[f"detail_{row['id']}"] = True
+                    with c3:
+                        if st.button("Details", key=f"btn_{row['id']}"):
+                            st.session_state[f"detail_{row['id']}"] = True
 
-                # Detailansicht
-                if st.session_state.get(f"detail_{row['id']}", False):
-                    with st.expander("Vollständige Falldaten", expanded=True):
-                        st.write(f"**Beschreibung:**\n{row['beschreibung']}")
-                        if medien:
-                            st.write("---")
-                            m_cols = st.columns(3)
-                            for i, m in enumerate(medien):
-                                with m_cols[i % 3]:
-                                    if "image" in m['type']:
-                                        img = get_drive_image(m['id'])
-                                        if img: st.image(img)
-                                    else:
-                                        st.video(m['url'])
-                                    st.markdown(f"[In Drive öffnen]({m['url']})")
-                        
-                        if st.button("Schließen", key=f"close_{row['id']}"):
-                            del st.session_state[f"detail_{row['id']}"]
-                            st.rerun()
+                    if st.session_state.get(f"detail_{row['id']}", False):
+                        with st.expander("Vollständige Falldaten", expanded=True):
+                            st.write(f"**Beschreibung:**\n{row['beschreibung']}")
+                            if medien:
+                                st.write("---")
+                                m_cols = st.columns(3)
+                                for i, m in enumerate(medien):
+                                    with m_cols[i % 3]:
+                                        if "image" in m['type']:
+                                            img = get_drive_image(m['id'])
+                                            if img: st.image(img)
+                                        else:
+                                            st.video(m['url'])
+                                        st.markdown(f"[In Drive öffnen]({m['url']})")
+                            
+                            if st.button("Schließen", key=f"close_{row['id']}"):
+                                del st.session_state[f"detail_{row['id']}"]
+                                st.rerun()
+    except Exception as e:
+        st.error(f"Fehler beim Abrufen der Daten: {e}")
