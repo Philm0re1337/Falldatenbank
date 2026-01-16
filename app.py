@@ -1,61 +1,71 @@
 import streamlit as st
 import pandas as pd
 import datetime
-import os
-import re
 import json
+import base64
+from PIL import Image
 import io
 
 # --- PRÜFUNG DER ABHÄNGIGKEITEN ---
 try:
     from google.cloud import firestore
     from google.oauth2 import service_account
-    from googleapiclient.discovery import build
-    from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 except ImportError as e:
     st.error(f"🚨 Fehler beim Laden der Bibliotheken: {e}")
+    st.info("Bitte stelle sicher, dass `google-cloud-firestore` in deiner requirements.txt steht.")
     st.stop()
 
-# --- KONFIGURATION & INITIALISIERUNG ---
+# --- KONFIGURATION ---
 firebase_info = st.secrets.get("FIREBASE_JSON")
 TEAM_PASSWORD = "2180"
-# Deine private E-Mail für die Übertragung der Eigentumsrechte
-USER_EMAIL = "philm0re1337@gmail.com"
-# ID deines Zielordners (muss für die Service-Account E-Mail freigegeben sein!)
-GDRIVE_FOLDER_ID = st.secrets.get("GDRIVE_FOLDER_ID", "0B5UeXbdEo09pR1h2T0pJNmdLMUE") 
 
 @st.cache_resource
-def get_services():
+def get_db():
     if not firebase_info:
         st.error("Google Credentials fehlen!")
         st.stop()
-    
     try:
         info = json.loads(firebase_info)
         credentials = service_account.Credentials.from_service_account_info(info)
-        scoped_credentials = credentials.with_scopes([
-            'https://www.googleapis.com/auth/cloud-platform',
-            'https://www.googleapis.com/auth/drive.file',
-            'https://www.googleapis.com/auth/drive'
-        ])
-        
         db = firestore.Client(
-            credentials=scoped_credentials, 
+            credentials=credentials, 
             project=info.get("project_id"),
             database="falldatenbank"
         )
-        drive_service = build('drive', 'v3', credentials=scoped_credentials)
-        return db, drive_service
+        return db
     except Exception as e:
-        st.error(f"Initialisierungsfehler: {e}")
+        st.error(f"Datenbankfehler: {e}")
         st.stop()
 
-db, drive_service = get_services()
+db = get_db()
 
-# --- UI SETTINGS ---
-st.set_page_config(page_title="Fall-Archiv Pro", layout="wide")
+# --- HILFSFUNKTIONEN (BASE64) ---
+def process_file(file):
+    """Konvertiert Dateien in Base64 und verkleinert Bilder falls nötig."""
+    file_type = file.type
+    
+    if "image" in file_type:
+        # Bild verkleinern, um unter dem 1MB Firestore Limit zu bleiben
+        img = Image.open(file)
+        # Maximal 1200px Breite/Höhe
+        img.thumbnail((1200, 1200))
+        buffer = io.BytesIO()
+        # Als JPEG speichern für bessere Kompression
+        img.save(buffer, format="JPEG", quality=75)
+        base64_str = base64.b64encode(buffer.getvalue()).decode()
+        return f"data:image/jpeg;base64,{base64_str}"
+    else:
+        # Für Videos/andere Dateien (Vorsicht: Darf nicht > 1MB sein!)
+        file_bytes = file.read()
+        if len(file_bytes) > 900000: # ~0.9 MB Sicherheitsgrenze
+            st.error(f"Datei {file.name} ist zu groß (max. 1MB erlaubt in Firestore).")
+            return None
+        base64_str = base64.b64encode(file_bytes).decode()
+        return f"data:{file_type};base64,{base64_str}"
 
-# --- AUTH ---
+# --- UI ---
+st.set_page_config(page_title="Fall-Archiv Lokal-Cloud", layout="wide")
+
 if "auth" not in st.session_state:
     st.title("🔒 Team Login")
     pwd = st.text_input("Passwort", type="password")
@@ -67,84 +77,6 @@ if "auth" not in st.session_state:
             st.error("Falsch")
     st.stop()
 
-# --- DRIVE FUNKTIONEN ---
-def upload_to_drive(file):
-    """
-    Lädt eine Datei hoch und versucht, den Besitz auf das private Konto zu übertragen,
-    um das 0GB-Limit des Service-Accounts zu umgehen.
-    """
-    file_metadata = {
-        'name': f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.name}",
-        'parents': [GDRIVE_FOLDER_ID]
-    }
-    
-    media = MediaIoBaseUpload(io.BytesIO(file.read()), mimetype=file.type, resumable=True)
-    
-    try:
-        # 1. Datei erstellen
-        drive_file = drive_service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields='id, webViewLink'
-        ).execute()
-        
-        file_id = drive_file.get('id')
-        
-        # 2. Berechtigung für dich hinzufügen und versuchen, den Besitz zu übertragen
-        # Hinweis: Das Übertragen des Besitzes (transferOwnership) funktioniert in 
-        # privaten Konten nur, wenn beide in der gleichen Organisation sind oder 
-        # unter bestimmten Bedingungen. Wir setzen dich zumindest als 'owner'.
-        try:
-            drive_service.permissions().create(
-                fileId=file_id,
-                body={
-                    'type': 'user',
-                    'role': 'owner',
-                    'emailAddress': USER_EMAIL
-                },
-                transferOwnership=True,
-                fields='id'
-            ).execute()
-        except Exception as perm_e:
-            # Falls transferOwnership scheitert (oft bei Gmail zu Gmail), 
-            # machen wir dich zumindest zum Editor, damit du die Datei siehst.
-            drive_service.permissions().create(
-                fileId=file_id,
-                body={
-                    'type': 'user',
-                    'role': 'writer',
-                    'emailAddress': USER_EMAIL
-                },
-                fields='id'
-            ).execute()
-            
-        return drive_file.get('webViewLink'), file_id
-        
-    except Exception as e:
-        if "storageQuotaExceeded" in str(e):
-            st.error("❌ Google Drive Quota-Limit überschritten.")
-            st.info(f"""
-            Selbst mit deiner E-Mail {USER_EMAIL} blockiert Google den Upload, da der Service-Account 
-            der initiale Ersteller ist. 
-            
-            **Nächster Schritt:** Wir sollten auf **Firebase Storage** umsteigen. Das ist für private Konten 
-            die stabilste Lösung.
-            """)
-        raise e
-
-def get_drive_image(file_id):
-    try:
-        request = drive_service.files().get_media(fileId=file_id)
-        fh = io.BytesIO()
-        downloader = MediaIoBaseDownload(fh, request)
-        done = False
-        while done is False:
-            status, done = downloader.next_chunk()
-        return fh.getvalue()
-    except:
-        return None
-
-# --- NAVIGATION ---
 mode = st.sidebar.radio("Navigation", ["Übersicht", "Neuanlage"])
 
 if mode == "Neuanlage":
@@ -153,42 +85,48 @@ if mode == "Neuanlage":
         fnr = st.text_input("Fall-Nummer")
         fdat = st.date_input("Datum", datetime.date.today())
         fbes = st.text_area("Beschreibung")
-        files = st.file_uploader("Dateien", accept_multiple_files=True)
+        files = st.file_uploader("Bilder/Videos (max. 1MB pro Datei)", accept_multiple_files=True)
         
         if st.form_submit_button("Speichern"):
             if fnr and fbes:
-                media_data = []
-                for f in files:
-                    try:
-                        url, f_id = upload_to_drive(f)
-                        media_data.append({"url": url, "id": f_id, "type": f.type})
-                    except Exception as e:
-                        st.error(f"Fehler bei {f.name}: {e}")
+                media_list = []
+                with st.spinner("Verarbeite Medien..."):
+                    for f in files:
+                        b64 = process_file(f)
+                        if b64:
+                            media_list.append({"name": f.name, "data": b64, "type": f.type})
                 
-                db.collection("falle").add({
-                    "fall_nummer": fnr,
-                    "datum": fdat.isoformat(),
-                    "beschreibung": fbes,
-                    "medien": media_data,
-                    "status": "Offen",
-                    "created_at": firestore.SERVER_TIMESTAMP
-                })
-                st.success("Erledigt!")
+                try:
+                    db.collection("falle").add({
+                        "fall_nummer": fnr,
+                        "datum": fdat.isoformat(),
+                        "beschreibung": fbes,
+                        "medien": media_list,
+                        "status": "Offen",
+                        "created_at": firestore.SERVER_TIMESTAMP
+                    })
+                    st.success("Fall wurde gespeichert!")
+                except Exception as e:
+                    st.error(f"Fehler: {e}")
 
 elif mode == "Übersicht":
-    st.header("📂 Archiv")
-    try:
-        docs = db.collection("falle").order_by("datum", direction=firestore.Query.DESCENDING).stream()
-        for doc in docs:
-            row = doc.to_dict()
-            with st.expander(f"Fall {row['fall_nummer']} - {row['datum']}"):
-                st.write(row['beschreibung'])
-                if row.get('medien'):
-                    for m in row['medien']:
+    st.header("📂 Fall-Archiv")
+    search = st.text_input("Suche...")
+    
+    docs = db.collection("falle").order_by("datum", direction=firestore.Query.DESCENDING).stream()
+    
+    for doc in docs:
+        row = doc.to_dict()
+        if search and search.lower() not in row['fall_nummer'].lower():
+            continue
+            
+        with st.expander(f"Fall {row['fall_nummer']} - {row['datum']}"):
+            st.write(row['beschreibung'])
+            if row.get('medien'):
+                cols = st.columns(3)
+                for i, m in enumerate(row['medien']):
+                    with cols[i % 3]:
                         if "image" in m['type']:
-                            img = get_drive_image(m['id'])
-                            if img: st.image(img, width=300)
+                            st.image(m['data'], caption=m['name'])
                         else:
-                            st.write(f"🎥 Video: [Link]({m['url']})")
-    except Exception as e:
-        st.error(f"Fehler: {e}")
+                            st.video(m['data'])
