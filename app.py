@@ -25,7 +25,7 @@ except ImportError as e:
     pandas
     ```
     
-    *Hinweis: Nach dem Erstellen der Datei kann es 1-2 Minuten dauern, bis Streamlit die Installation abgeschlossen hat.*
+    *Hinweis: Achte darauf, dass KEIN anderer Text (wie Anleitungen oder Zahlen) in der Datei steht.*
     """)
     st.stop()
 
