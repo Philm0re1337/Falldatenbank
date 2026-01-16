@@ -15,22 +15,18 @@ try:
 except ImportError as e:
     st.error(f"🚨 Fehler beim Laden der Bibliotheken: {e}")
     st.info("""
-    **Lösung:** Streamlit konnte die benötigten Pakete nicht installieren. 
-    Bitte überprüfe, ob deine **requirements.txt** im Hauptverzeichnis deines GitHub-Repositories liegt und exakt diesen Inhalt hat:
-    
+    **Lösung:** Bitte überprüfe deine **requirements.txt** im GitHub-Repository. 
+    Inhalt:
     ```
     google-cloud-firestore
     google-api-python-client
     google-auth
     pandas
     ```
-    
-    *Hinweis: Achte darauf, dass KEIN anderer Text (wie Anleitungen oder Zahlen) in der Datei steht.*
     """)
     st.stop()
 
 # --- KONFIGURATION & INITIALISIERUNG ---
-# Secrets abrufen
 firebase_info = st.secrets.get("FIREBASE_JSON")
 TEAM_PASSWORD = "2180"
 GDRIVE_FOLDER_ID = st.secrets.get("GDRIVE_FOLDER_ID", "0B5UeXbdEo09pR1h2T0pJNmdLMUE") 
@@ -45,14 +41,20 @@ def get_services():
         info = json.loads(firebase_info)
         credentials = service_account.Credentials.from_service_account_info(info)
         
-        # Scopes für Firestore und Drive definieren
         scoped_credentials = credentials.with_scopes([
             'https://www.googleapis.com/auth/cloud-platform',
             'https://www.googleapis.com/auth/drive.file',
             'https://www.googleapis.com/auth/drive.readonly'
         ])
         
-        db = firestore.Client(credentials=scoped_credentials)
+        # Falls deine Datenbank-ID nicht '(default)' ist, sondern 'falldatenbank'
+        # geben wir sie hier explizit an. 
+        # Meistens heißt die Datenbank-Instanz trotzdem '(default)', auch wenn das Projekt 'falldatenbank' heißt.
+        try:
+            db = firestore.Client(credentials=scoped_credentials, database="(default)")
+        except:
+            db = firestore.Client(credentials=scoped_credentials)
+            
         drive_service = build('drive', 'v3', credentials=scoped_credentials)
         
         return db, drive_service
@@ -79,24 +81,15 @@ if "auth" not in st.session_state:
 
 # --- GOOGLE DRIVE FUNKTIONEN ---
 def upload_to_drive(file):
-    """Lädt eine Datei in Google Drive hoch."""
     file_metadata = {
         'name': f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.name}",
         'parents': [GDRIVE_FOLDER_ID]
     }
-    
     media = MediaIoBaseUpload(io.BytesIO(file.read()), mimetype=file.type, resumable=True)
-    
-    drive_file = drive_service.files().create(
-        body=file_metadata,
-        media_body=media,
-        fields='id, webViewLink'
-    ).execute()
-    
+    drive_file = drive_service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink').execute()
     return drive_file.get('webViewLink'), drive_file.get('id')
 
 def get_drive_image(file_id):
-    """Lädt ein Bild aus Drive in den Speicher, um es in Streamlit anzuzeigen."""
     try:
         request = drive_service.files().get_media(fileId=file_id)
         fh = io.BytesIO()
@@ -131,7 +124,6 @@ if mode == "Neuanlage":
                         except Exception as e:
                             st.error(f"Fehler beim Upload von {f.name}: {e}")
                 
-                # In Firestore speichern
                 try:
                     doc_ref = db.collection("falle").document()
                     doc_ref.set({
@@ -145,17 +137,15 @@ if mode == "Neuanlage":
                     })
                     st.success(f"Fall {fnr} wurde erfolgreich angelegt!")
                 except Exception as e:
-                    st.error(f"Fehler beim Speichern in der Datenbank: {e}")
+                    st.error(f"Datenbankfehler: {e}. Prüfe, ob Firestore im Projekt aktiviert ist.")
             else:
                 st.warning("Bitte Fall-Nummer und Beschreibung ausfüllen.")
 
 # --- ÜBERSICHT ---
 elif mode == "Übersicht":
     st.header("📂 Fall-Archiv (Cloud)")
-    
     search_query = st.text_input("🔍 Suche nach Fallnummer...", "").strip()
     
-    # Daten abrufen
     try:
         docs = db.collection("falle").order_by("datum", direction=firestore.Query.DESCENDING).stream()
         data = []
@@ -174,42 +164,25 @@ elif mode == "Übersicht":
             for _, row in df.iterrows():
                 with st.container(border=True):
                     c1, c2, c3 = st.columns([2, 4, 1])
-                    
                     with c1:
                         medien = row.get('medien', [])
                         if medien and "image" in medien[0]['type']:
                             img_data = get_drive_image(medien[0]['id'])
-                            if img_data:
-                                st.image(img_data, use_container_width=True)
+                            if img_data: st.image(img_data, use_container_width=True)
                         else:
                             st.write("📁 Keine Vorschau")
-
                     with c2:
                         st.subheader(f"Fall {row['fall_nummer']}")
                         st.write(f"📅 {row['datum']} | Status: **{row['status']}**")
-                        st.write(row['beschreibung'][:150] + "...")
-
                     with c3:
                         if st.button("Details", key=f"btn_{row['id']}"):
                             st.session_state[f"detail_{row['id']}"] = True
 
                     if st.session_state.get(f"detail_{row['id']}", False):
-                        with st.expander("Vollständige Falldaten", expanded=True):
-                            st.write(f"**Beschreibung:**\n{row['beschreibung']}")
-                            if medien:
-                                st.write("---")
-                                m_cols = st.columns(3)
-                                for i, m in enumerate(medien):
-                                    with m_cols[i % 3]:
-                                        if "image" in m['type']:
-                                            img = get_drive_image(m['id'])
-                                            if img: st.image(img)
-                                        else:
-                                            st.video(m['url'])
-                                        st.markdown(f"[In Drive öffnen]({m['url']})")
-                            
+                        with st.expander("Details", expanded=True):
+                            st.write(row['beschreibung'])
                             if st.button("Schließen", key=f"close_{row['id']}"):
                                 del st.session_state[f"detail_{row['id']}"]
                                 st.rerun()
     except Exception as e:
-        st.error(f"Fehler beim Abrufen der Daten aus Firestore: {e}")
+        st.error(f"Fehler beim Abrufen: {e}")
