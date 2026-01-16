@@ -5,6 +5,7 @@ import json
 import base64
 from PIL import Image
 import io
+import urllib.parse
 
 # --- PRÜFUNG DER ABHÄNGIGKEITEN ---
 try:
@@ -18,6 +19,8 @@ except ImportError as e:
 # --- KONFIGURATION ---
 firebase_info = st.secrets.get("FIREBASE_JSON")
 TEAM_PASSWORD = "2180"
+# Hier kannst du die Telefonnummer der Firma oder Gruppe hinterlegen
+WHATSAPP_TARGET = "491234567890" 
 
 @st.cache_resource
 def get_db():
@@ -39,32 +42,37 @@ def get_db():
 
 db = get_db()
 
-# --- HILFSFUNKTIONEN (BASE64) ---
+# --- HILFSFUNKTIONEN ---
 def process_file(file):
-    """Konvertiert Dateien in Base64 und verkleinert Bilder falls nötig."""
+    """Verarbeitet Bilder für Firestore (Base64) oder erkennt zu große Videos."""
     file_type = file.type
     
     if "image" in file_type:
-        # Bild verkleinern, um unter dem 1MB Firestore Limit zu bleiben
-        img = Image.open(file)
-        # Maximal 1200px Breite/Höhe
-        img.thumbnail((1200, 1200))
-        buffer = io.BytesIO()
-        # Als JPEG speichern für bessere Kompression
-        img.save(buffer, format="JPEG", quality=75)
-        base64_str = base64.b64encode(buffer.getvalue()).decode()
-        return f"data:image/jpeg;base64,{base64_str}"
-    else:
-        # Für Videos/andere Dateien (Vorsicht: Darf nicht > 1MB sein!)
-        file_bytes = file.read()
-        if len(file_bytes) > 900000: # ~0.9 MB Sicherheitsgrenze
-            st.error(f"Datei {file.name} ist zu groß (max. 1MB erlaubt in Firestore).")
+        try:
+            img = Image.open(file)
+            img.thumbnail((1000, 1000))
+            buffer = io.BytesIO()
+            img.save(buffer, format="JPEG", quality=70)
+            base64_str = base64.b64encode(buffer.getvalue()).decode()
+            return {"data": f"data:image/jpeg;base64,{base64_str}", "status": "stored"}
+        except:
             return None
-        base64_str = base64.b64encode(file_bytes).decode()
-        return f"data:{file_type};base64,{base64_str}"
+    else:
+        # Videos werden in Firestore oft zu groß (>1MB)
+        file_bytes = file.read()
+        if len(file_bytes) > 950000:
+            # Zu groß für Firestore -> Markierung für externen Versand
+            return {"data": file.name, "status": "external", "size": len(file_bytes)}
+        else:
+            base64_str = base64.b64encode(file_bytes).decode()
+            return {"data": f"data:{file_type};base64,{base64_str}", "status": "stored"}
+
+def create_whatsapp_link(text):
+    encoded_text = urllib.parse.quote(text)
+    return f"https://wa.me/{WHATSAPP_TARGET}?text={encoded_text}"
 
 # --- UI ---
-st.set_page_config(page_title="Fall-Archiv Lokal-Cloud", layout="wide")
+st.set_page_config(page_title="Fall-Archiv & Video-Manager", layout="wide")
 
 if "auth" not in st.session_state:
     st.title("🔒 Team Login")
@@ -85,16 +93,22 @@ if mode == "Neuanlage":
         fnr = st.text_input("Fall-Nummer")
         fdat = st.date_input("Datum", datetime.date.today())
         fbes = st.text_area("Beschreibung")
-        files = st.file_uploader("Bilder/Videos (max. 1MB pro Datei)", accept_multiple_files=True)
+        files = st.file_uploader("Medien (Bilder landen in Cloud, große Videos per WA)", accept_multiple_files=True)
         
         if st.form_submit_button("Speichern"):
             if fnr and fbes:
                 media_list = []
+                external_videos = []
+                
                 with st.spinner("Verarbeite Medien..."):
                     for f in files:
-                        b64 = process_file(f)
-                        if b64:
-                            media_list.append({"name": f.name, "data": b64, "type": f.type})
+                        res = process_file(f)
+                        if res:
+                            if res["status"] == "stored":
+                                media_list.append({"name": f.name, "data": res["data"], "type": f.type, "stored": True})
+                            else:
+                                media_list.append({"name": f.name, "data": "Extern gespeichert (WhatsApp/Server)", "type": f.type, "stored": False})
+                                external_videos.append(f.name)
                 
                 try:
                     db.collection("falle").add({
@@ -105,7 +119,15 @@ if mode == "Neuanlage":
                         "status": "Offen",
                         "created_at": firestore.SERVER_TIMESTAMP
                     })
-                    st.success("Fall wurde gespeichert!")
+                    
+                    st.success(f"Fall {fnr} in Datenbank angelegt!")
+                    
+                    if external_videos:
+                        st.warning(f"⚠️ {len(external_videos)} Videos sind zu groß für die Cloud.")
+                        wa_text = f"Neuer Fall: {fnr}\nDatum: {fdat}\nVideos: {', '.join(external_videos)}\n\nBitte hier hochladen/senden!"
+                        wa_url = create_whatsapp_link(wa_text)
+                        st.markdown(f'<a href="{wa_url}" target="_blank" style="text-decoration:none;"><div style="background-color:#25D366;color:white;padding:10px;text-align:center;border-radius:5px;">Jetzt Videos per WhatsApp senden</div></a>', unsafe_allow_html=True)
+                        
                 except Exception as e:
                     st.error(f"Fehler: {e}")
 
@@ -121,12 +143,17 @@ elif mode == "Übersicht":
             continue
             
         with st.expander(f"Fall {row['fall_nummer']} - {row['datum']}"):
-            st.write(row['beschreibung'])
+            st.write(f"**Beschreibung:** {row['beschreibung']}")
+            
             if row.get('medien'):
+                st.write("---")
                 cols = st.columns(3)
                 for i, m in enumerate(row['medien']):
                     with cols[i % 3]:
-                        if "image" in m['type']:
-                            st.image(m['data'], caption=m['name'])
+                        if m.get("stored", True):
+                            if "image" in m['type']:
+                                st.image(m['data'], caption=m['name'])
+                            else:
+                                st.video(m['data'])
                         else:
-                            st.video(m['data'])
+                            st.info(f"🎥 {m['name']}\n(Video wurde extern gesendet)")
