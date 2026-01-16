@@ -2,4 +2,3 @@ google-cloud-firestore
 google-api-python-client
 google-auth
 pandas
-4. Speichere (Commit) die Datei.
