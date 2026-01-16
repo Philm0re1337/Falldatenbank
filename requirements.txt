@@ -1,5 +1,5 @@
-streamlit
-pandas
+google-cloud-firestore
 google-api-python-client
-google-auth-httplib2
-google-auth-oauthlib
+google-auth
+pandas
+4. Speichere (Commit) die Datei.
