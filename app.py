@@ -6,17 +6,17 @@ import re
 import json
 import io
 
-# Wir versuchen die Bibliotheken zu importieren. 
-# Falls sie fehlen, geben wir eine klare Anweisung für die requirements.txt aus.
+# --- PRÜFUNG DER ABHÄNGIGKEITEN ---
 try:
     from google.cloud import firestore
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
-except ImportError:
-    st.error("🚨 Fehlende Bibliotheken erkannt!")
+except ImportError as e:
+    st.error(f"🚨 Fehler beim Laden der Bibliotheken: {e}")
     st.info("""
-    Bitte stelle sicher, dass eine Datei namens **requirements.txt** in deinem GitHub-Repository liegt, die folgenden Inhalt hat:
+    **Lösung:** Streamlit konnte die benötigten Pakete nicht installieren. 
+    Bitte überprüfe, ob deine **requirements.txt** im Hauptverzeichnis deines GitHub-Repositories liegt und exakt diesen Inhalt hat:
     
     ```
     google-cloud-firestore
@@ -24,10 +24,13 @@ except ImportError:
     google-auth
     pandas
     ```
+    
+    *Hinweis: Nach dem Erstellen der Datei kann es 1-2 Minuten dauern, bis Streamlit die Installation abgeschlossen hat.*
     """)
     st.stop()
 
 # --- KONFIGURATION & INITIALISIERUNG ---
+# Secrets abrufen
 firebase_info = st.secrets.get("FIREBASE_JSON")
 TEAM_PASSWORD = "2180"
 GDRIVE_FOLDER_ID = st.secrets.get("GDRIVE_FOLDER_ID", "0B5UeXbdEo09pR1h2T0pJNmdLMUE") 
@@ -35,13 +38,14 @@ GDRIVE_FOLDER_ID = st.secrets.get("GDRIVE_FOLDER_ID", "0B5UeXbdEo09pR1h2T0pJNmdL
 @st.cache_resource
 def get_services():
     if not firebase_info:
-        st.error("Google Credentials (JSON) fehlen in den Streamlit Secrets!")
+        st.error("Google Credentials (FIREBASE_JSON) fehlen in den Streamlit Secrets!")
         st.stop()
     
     try:
         info = json.loads(firebase_info)
         credentials = service_account.Credentials.from_service_account_info(info)
         
+        # Scopes für Firestore und Drive definieren
         scoped_credentials = credentials.with_scopes([
             'https://www.googleapis.com/auth/cloud-platform',
             'https://www.googleapis.com/auth/drive.file',
@@ -121,21 +125,27 @@ if mode == "Neuanlage":
                 media_data = []
                 with st.spinner("Dateien werden in Google Drive gesichert..."):
                     for f in files:
-                        url, file_id = upload_to_drive(f)
-                        media_data.append({"url": url, "id": file_id, "type": f.type})
+                        try:
+                            url, file_id = upload_to_drive(f)
+                            media_data.append({"url": url, "id": file_id, "type": f.type})
+                        except Exception as e:
+                            st.error(f"Fehler beim Upload von {f.name}: {e}")
                 
                 # In Firestore speichern
-                doc_ref = db.collection("falle").document()
-                doc_ref.set({
-                    "fall_nummer": fnr,
-                    "datum": fdat.isoformat(),
-                    "beschreibung": fbes,
-                    "medien": media_data,
-                    "status": "Offen",
-                    "zahlbetrag": 0.0,
-                    "created_at": firestore.SERVER_TIMESTAMP
-                })
-                st.success(f"Fall {fnr} wurde erfolgreich angelegt!")
+                try:
+                    doc_ref = db.collection("falle").document()
+                    doc_ref.set({
+                        "fall_nummer": fnr,
+                        "datum": fdat.isoformat(),
+                        "beschreibung": fbes,
+                        "medien": media_data,
+                        "status": "Offen",
+                        "zahlbetrag": 0.0,
+                        "created_at": firestore.SERVER_TIMESTAMP
+                    })
+                    st.success(f"Fall {fnr} wurde erfolgreich angelegt!")
+                except Exception as e:
+                    st.error(f"Fehler beim Speichern in der Datenbank: {e}")
             else:
                 st.warning("Bitte Fall-Nummer und Beschreibung ausfüllen.")
 
@@ -202,4 +212,4 @@ elif mode == "Übersicht":
                                 del st.session_state[f"detail_{row['id']}"]
                                 st.rerun()
     except Exception as e:
-        st.error(f"Fehler beim Abrufen der Daten: {e}")
+        st.error(f"Fehler beim Abrufen der Daten aus Firestore: {e}")
