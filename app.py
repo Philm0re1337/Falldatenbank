@@ -1,66 +1,57 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
 import datetime
 import os
 import re
+import json
+from google.cloud import firestore
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
+import io
 
-# --- KONFIGURATION ---
-DB_NAME = "fall_archiv_lokal.db"
+# --- KONFIGURATION & INITIALISIERUNG ---
+# Den Inhalt der hochgeladenen JSON-Datei bitte in Streamlit unter Secrets -> FIREBASE_JSON einfügen
+firebase_info = st.secrets.get("FIREBASE_JSON")
 TEAM_PASSWORD = "2180"
-UPLOAD_FOLDER = "uploads"
+# Die ID deines Google Drive Ordners: 0B5UeXbdEo09pR1h2T0pJNmdLMUE
+GDRIVE_FOLDER_ID = st.secrets.get("GDRIVE_FOLDER_ID", "0B5UeXbdEo09pR1h2T0pJNmdLMUE") 
 
-# Verzeichnis für Uploads erstellen, falls nicht vorhanden
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
-
-# --- DATENBANK FUNKTIONEN ---
-def get_db_connection():
-    db_path = os.path.join(os.getcwd(), DB_NAME)
-    return sqlite3.connect(db_path, check_same_thread=False)
-
-def init_db():
-    conn = get_db_connection()
-    c = conn.cursor()
-    # Basis-Tabelle erstellen
-    c.execute('''CREATE TABLE IF NOT EXISTS falle 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  fall_nummer TEXT, 
-                  datum DATE, 
-                  beschreibung TEXT)''')
+@st.cache_resource
+def get_services():
+    if not firebase_info:
+        st.error("Google Credentials (JSON) fehlen in den Streamlit Secrets!")
+        st.stop()
     
-    # Spalten-Check für Erweiterungen
-    c.execute("PRAGMA table_info(falle)")
-    columns = [column[1] for column in c.fetchall()]
-    
-    # medien_pfade hinzufügen falls fehlt
-    if 'medien_pfade' not in columns:
-        c.execute("ALTER TABLE falle ADD COLUMN medien_pfade TEXT")
-    
-    # status hinzufügen falls fehlt (Default: 'Offen')
-    if 'status' not in columns:
-        c.execute("ALTER TABLE falle ADD COLUMN status TEXT DEFAULT 'Offen'")
+    try:
+        info = json.loads(firebase_info)
+        credentials = service_account.Credentials.from_service_account_info(info)
         
-    # zahlbetrag hinzufügen falls fehlt
-    if 'zahlbetrag' not in columns:
-        c.execute("ALTER TABLE falle ADD COLUMN zahlbetrag REAL DEFAULT 0.0")
-            
-    conn.commit()
-    conn.close()
+        # Scopes für Firestore und Drive
+        scoped_credentials = credentials.with_scopes([
+            'https://www.googleapis.com/auth/cloud-platform',
+            'https://www.googleapis.com/auth/drive.file',
+            'https://www.googleapis.com/auth/drive.readonly'
+        ])
+        
+        db = firestore.Client(credentials=scoped_credentials)
+        drive_service = build('drive', 'v3', credentials=scoped_credentials)
+        
+        return db, drive_service
+    except Exception as e:
+        st.error(f"Fehler bei der Initialisierung der Google Dienste: {e}")
+        st.stop()
 
-init_db()
+db, drive_service = get_services()
 
 # --- UI SETTINGS ---
-st.set_page_config(page_title="Fall-Archiv Pro", layout="wide")
+st.set_page_config(page_title="Fall-Archiv Pro (Google Drive Cloud)", layout="wide")
 
 # --- AUTHENTIFIZIERUNG ---
 if "auth" not in st.session_state:
     st.title("🔒 Team Login")
-    # Durch die Verwendung von on_change oder einfach der Prüfung des Rückgabewerts 
-    # kann man Enter nutzen, ohne explizit auf einen Button zu klicken.
-    pwd = st.text_input("Passwort eingeben und Enter drücken", type="password")
-    
-    if pwd: # Wenn etwas eingegeben und Enter gedrückt wurde
+    pwd = st.text_input("Passwort eingeben", type="password")
+    if st.button("Anmelden") or (pwd == TEAM_PASSWORD and pwd != ""):
         if pwd == TEAM_PASSWORD:
             st.session_state["auth"] = True
             st.rerun()
@@ -68,19 +59,39 @@ if "auth" not in st.session_state:
             st.error("Falsches Passwort")
     st.stop()
 
+# --- GOOGLE DRIVE FUNKTIONEN ---
+def upload_to_drive(file):
+    """Lädt eine Datei in Google Drive hoch."""
+    file_metadata = {
+        'name': f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.name}",
+        'parents': [GDRIVE_FOLDER_ID]
+    }
+    
+    media = MediaIoBaseUpload(io.BytesIO(file.read()), mimetype=file.type, resumable=True)
+    
+    drive_file = drive_service.files().create(
+        body=file_metadata,
+        media_body=media,
+        fields='id, webViewLink'
+    ).execute()
+    
+    return drive_file.get('webViewLink'), drive_file.get('id')
+
+def get_drive_image(file_id):
+    """Lädt ein Bild aus Drive in den Speicher, um es in Streamlit anzuzeigen."""
+    try:
+        request = drive_service.files().get_media(fileId=file_id)
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while done is False:
+            status, done = downloader.next_chunk()
+        return fh.getvalue()
+    except:
+        return None
+
 # --- NAVIGATION ---
 mode = st.sidebar.radio("Navigation", ["Übersicht", "Neuanlage"])
-
-# --- FUNKTION: DATEIEN SPEICHERN ---
-def save_uploaded_files(files):
-    filenames = []
-    for f in files:
-        clean_name = re.sub(r'[^a-zA-Z0-9.-]', '_', f.name)
-        f_path = os.path.join(UPLOAD_FOLDER, clean_name)
-        with open(f_path, "wb") as buffer:
-            buffer.write(f.getbuffer())
-        filenames.append(clean_name)
-    return ",".join(filenames)
 
 # --- NEUANLAGE ---
 if mode == "Neuanlage":
@@ -89,166 +100,90 @@ if mode == "Neuanlage":
         fnr = st.text_input("Fall-Nummer")
         fdat = st.date_input("Datum", datetime.date.today())
         fbes = st.text_area("Beschreibung")
-        files = st.file_uploader("Bilder & Videos hochladen", accept_multiple_files=True, type=["jpg","png","jpeg","mp4","mov"])
+        files = st.file_uploader("Bilder & Videos auswählen", accept_multiple_files=True, type=["jpg","png","jpeg","mp4","mov"])
         
-        if st.form_submit_button("Speichern"):
+        if st.form_submit_button("Fall speichern"):
             if fnr and fbes:
-                m_pfade = save_uploaded_files(files) if files else ""
-                conn = get_db_connection()
-                c = conn.cursor()
-                c.execute("INSERT INTO falle (fall_nummer, datum, beschreibung, medien_pfade, status) VALUES (?, ?, ?, ?, ?)", 
-                          (fnr, fdat, fbes, m_pfade, "Offen"))
-                conn.commit()
-                conn.close()
-                st.success(f"Fall {fnr} wurde angelegt!")
+                media_data = []
+                with st.spinner("Dateien werden in Google Drive gesichert..."):
+                    for f in files:
+                        url, file_id = upload_to_drive(f)
+                        media_data.append({"url": url, "id": file_id, "type": f.type})
+                
+                # In Firestore speichern
+                doc_ref = db.collection("falle").document()
+                doc_ref.set({
+                    "fall_nummer": fnr,
+                    "datum": fdat.isoformat(),
+                    "beschreibung": fbes,
+                    "medien": media_data,
+                    "status": "Offen",
+                    "zahlbetrag": 0.0,
+                    "created_at": firestore.SERVER_TIMESTAMP
+                })
+                st.success(f"Fall {fnr} wurde erfolgreich angelegt!")
             else:
-                st.warning("Bitte Pflichtfelder (Nummer & Beschreibung) ausfüllen.")
+                st.warning("Bitte Fall-Nummer und Beschreibung ausfüllen.")
 
 # --- ÜBERSICHT ---
 elif mode == "Übersicht":
-    st.header("📂 Archivierte Fälle")
+    st.header("📂 Fall-Archiv (Cloud)")
     
-    # Filter/Suche
-    c_s1, c_s2 = st.columns([2, 1])
-    with c_s1:
-        search_query = st.text_input("🔍 Suche nach Fallnummer oder Stichworten", "").strip()
-    with c_s2:
-        filter_status = st.selectbox("Status filtern", ["Alle", "Offen", "Erledigt"])
+    search_query = st.text_input("🔍 Suche nach Fallnummer...", "").strip()
     
-    conn = get_db_connection()
-    df = pd.read_sql_query("SELECT * FROM falle ORDER BY datum DESC", conn)
-    conn.close()
-
-    if df.empty:
-        st.info("Keine Fälle im Archiv vorhanden.")
+    # Daten abrufen
+    docs = db.collection("falle").order_by("datum", direction=firestore.Query.DESCENDING).stream()
+    data = []
+    for doc in docs:
+        d = doc.to_dict()
+        d['id'] = doc.id
+        data.append(d)
+    
+    if not data:
+        st.info("Noch keine Fälle im Archiv.")
     else:
-        # Filter anwenden
+        df = pd.DataFrame(data)
         if search_query:
-            df = df[df['fall_nummer'].str.contains(search_query, case=False, na=False) | 
-                    df['beschreibung'].str.contains(search_query, case=False, na=False)]
-        
-        if filter_status != "Alle":
-            df = df[df['status'] == filter_status]
+            df = df[df['fall_nummer'].str.contains(search_query, case=False, na=False)]
 
-        if df.empty:
-            st.warning("Keine Treffer für deine Auswahl.")
-        
-        for index, row in df.iterrows():
-            # Farbschema basierend auf Status
-            status_color = "🟢" if row['status'] == "Erledigt" else "🟡"
-            
+        for _, row in df.iterrows():
             with st.container(border=True):
-                col_thumb, col_info, col_status = st.columns([1, 3, 1])
+                c1, c2, c3 = st.columns([2, 4, 1])
                 
-                # --- VORSCHAU ---
-                with col_thumb:
-                    first_img = None
-                    if row['medien_pfade']:
-                        all_files = row['medien_pfade'].split(",")
-                        for f_name in all_files:
-                            if f_name.lower().endswith(('.jpg', '.jpeg', '.png')):
-                                p = os.path.join(UPLOAD_FOLDER, f_name)
-                                if os.path.exists(p):
-                                    first_img = p
-                                    break
-                    if first_img:
-                        st.image(first_img, use_container_width=True)
+                with c1:
+                    medien = row.get('medien', [])
+                    if medien and "image" in medien[0]['type']:
+                        img_data = get_drive_image(medien[0]['id'])
+                        if img_data:
+                            st.image(img_data, use_container_width=True)
                     else:
-                        st.caption("Kein Bild")
+                        st.write("📁 Keine Vorschau")
 
-                # --- INFO ---
-                with col_info:
-                    st.subheader(f"{status_color} Fall: {row['fall_nummer']}")
-                    st.write(f"📅 **Datum:** {row['datum']}")
-                    short_desc = row['beschreibung'][:150] + "..." if len(row['beschreibung']) > 150 else row['beschreibung']
-                    st.write(f"📝 {short_desc}")
-                    if row['status'] == "Erledigt":
-                        st.write(f"💰 **Zahlbetrag:** {row['zahlbetrag']:.2f} €")
+                with c2:
+                    st.subheader(f"Fall {row['fall_nummer']}")
+                    st.write(f"📅 {row['datum']} | Status: **{row['status']}**")
+                    st.write(row['beschreibung'][:150] + "...")
 
-                # --- QUICK STATUS ---
-                with col_status:
-                    st.write("**Status ändern:**")
-                    new_status = st.selectbox("Status", ["Offen", "Erledigt"], 
-                                             index=0 if row['status'] == "Offen" else 1, 
-                                             key=f"stat_sel_{row['id']}")
-                    
-                    # Falls Status geändert wurde
-                    if new_status != row['status']:
-                        conn = get_db_connection()
-                        c = conn.cursor()
-                        c.execute("UPDATE falle SET status = ? WHERE id = ?", (new_status, row['id']))
-                        conn.commit()
-                        conn.close()
-                        st.rerun()
+                with c3:
+                    if st.button("Details", key=f"btn_{row['id']}"):
+                        st.session_state[f"detail_{row['id']}"] = True
 
-                # --- DETAILS ---
-                with st.expander("Details, Medien & Bearbeitung"):
-                    edit_key = f"edit_{row['id']}"
-                    delete_confirm_key = f"delete_confirm_{row['id']}"
-
-                    if edit_key not in st.session_state and delete_confirm_key not in st.session_state:
-                        st.write(f"**Vollständige Beschreibung:**\n{row['beschreibung']}")
-                        
-                        if row['medien_pfade']:
+                # Detailansicht
+                if st.session_state.get(f"detail_{row['id']}", False):
+                    with st.expander("Vollständige Falldaten", expanded=True):
+                        st.write(f"**Beschreibung:**\n{row['beschreibung']}")
+                        if medien:
                             st.write("---")
-                            st.write("**Anhänge:**")
                             m_cols = st.columns(3)
-                            files = row['medien_pfade'].split(",")
-                            for i, f_name in enumerate(files):
-                                p = os.path.join(UPLOAD_FOLDER, f_name)
-                                if os.path.exists(p):
-                                    with m_cols[i % 3]:
-                                        if f_name.lower().endswith(('.mp4', '.mov')):
-                                            st.video(p)
-                                        else:
-                                            st.image(p, caption=f_name)
+                            for i, m in enumerate(medien):
+                                with m_cols[i % 3]:
+                                    if "image" in m['type']:
+                                        img = get_drive_image(m['id'])
+                                        if img: st.image(img)
+                                    else:
+                                        st.video(m['url'])
+                                    st.markdown(f"[In Drive öffnen]({m['url']})")
                         
-                        st.write("---")
-                        c1, c2, _ = st.columns([1, 1, 4])
-                        if c1.button("Bearbeiten", key=f"btn_ed_{row['id']}"):
-                            st.session_state[edit_key] = True
+                        if st.button("Schließen", key=f"close_{row['id']}"):
+                            del st.session_state[f"detail_{row['id']}"]
                             st.rerun()
-                        
-                        if c2.button("Löschen", key=f"btn_del_{row['id']}", type="primary"):
-                            st.session_state[delete_confirm_key] = True
-                            st.rerun()
-                    
-                    elif delete_confirm_key in st.session_state:
-                        st.warning(f"⚠️ Fall **{row['fall_nummer']}** wirklich löschen?")
-                        dc1, dc2, _ = st.columns([1, 1, 4])
-                        if dc1.button("Dauerhaft löschen", key=f"confirm_del_{row['id']}", type="primary"):
-                            conn = get_db_connection()
-                            c = conn.cursor()
-                            c.execute("DELETE FROM falle WHERE id = ?", (row['id'],))
-                            conn.commit()
-                            conn.close()
-                            del st.session_state[delete_confirm_key]
-                            st.rerun()
-                        if dc2.button("Abbrechen", key=f"cancel_del_{row['id']}"):
-                            del st.session_state[delete_confirm_key]
-                            st.rerun()
-
-                    elif edit_key in st.session_state:
-                        st.write("### 📝 Fall bearbeiten")
-                        with st.form(key=f"edit_form_{row['id']}"):
-                            e_fnr = st.text_input("Fall-Nummer", row['fall_nummer'])
-                            e_dat = st.date_input("Datum", datetime.datetime.strptime(row['datum'], '%Y-%m-%d').date() if isinstance(row['datum'], str) else row['datum'])
-                            e_bes = st.text_area("Beschreibung", row['beschreibung'])
-                            e_sta = st.selectbox("Status", ["Offen", "Erledigt"], index=0 if row['status'] == "Offen" else 1)
-                            
-                            # Zahlbetrag nur anzeigen/editierbar machen wenn Erledigt
-                            e_betrag = st.number_input("Zahlbetrag (€)", value=float(row['zahlbetrag']) if row['zahlbetrag'] else 0.0, step=0.01)
-                            
-                            bc1, bc2, _ = st.columns([1, 1, 2])
-                            if bc1.form_submit_button("Speichern"):
-                                conn = get_db_connection()
-                                c = conn.cursor()
-                                c.execute("UPDATE falle SET fall_nummer = ?, datum = ?, beschreibung = ?, status = ?, zahlbetrag = ? WHERE id = ?", 
-                                          (e_fnr, e_dat, e_bes, e_sta, e_betrag, row['id']))
-                                conn.commit()
-                                conn.close()
-                                del st.session_state[edit_key]
-                                st.rerun()
-                            if bc2.form_submit_button("Abbrechen"):
-                                del st.session_state[edit_key]
-                                st.rerun()
