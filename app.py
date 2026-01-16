@@ -15,22 +15,35 @@ if not os.path.exists(UPLOAD_FOLDER):
 
 # --- DATENBANK FUNKTIONEN ---
 def get_db_connection():
-    conn = sqlite3.connect(DB_NAME, check_same_thread=False)
-    return conn
+    # Wir nutzen einen absoluten Pfad, um Schreibrechte-Probleme zu minimieren
+    db_path = os.path.join(os.getcwd(), DB_NAME)
+    return sqlite3.connect(db_path, check_same_thread=False)
 
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
-    # Erweitert um Spalten für Medien (als Text-Pfade)
+    # 1. Basis-Tabelle erstellen
     c.execute('''CREATE TABLE IF NOT EXISTS falle 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, 
                   fall_nummer TEXT, 
                   datum DATE, 
-                  beschreibung TEXT, 
-                  medien_pfade TEXT)''')
+                  beschreibung TEXT)''')
+    
+    # 2. SPALTEN-CHECK (Reparatur-Logik)
+    # Wir prüfen, ob 'medien_pfade' existiert, falls nicht -> hinzufügen
+    c.execute("PRAGMA table_info(falle)")
+    columns = [column[1] for column in c.fetchall()]
+    if 'medien_pfade' not in columns:
+        try:
+            c.execute("ALTER TABLE falle ADD COLUMN medien_pfade TEXT")
+            conn.commit()
+        except Exception as e:
+            st.error(f"Fehler bei DB-Update: {e}")
+            
     conn.commit()
     conn.close()
 
+# Initialisierung aufrufen
 init_db()
 
 # --- UI SETTINGS ---
@@ -160,3 +173,4 @@ elif mode == "Daten-Backup":
     csv = df.to_csv(index=False).encode('utf-8')
     st.download_button("Als CSV (Excel) exportieren", data=csv, file_name="fall_archiv_backup.csv", mime="text/csv")
     st.write("Nutze diesen Button regelmäßig, um deine Daten lokal zu sichern.")
+
