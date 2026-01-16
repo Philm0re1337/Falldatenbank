@@ -1,11 +1,11 @@
 import streamlit as st
-import pandas as pd
+import pd
 import datetime
 import json
 import base64
 from PIL import Image
 import io
-import urllib.parse
+import requests
 
 # --- PRÜFUNG DER ABHÄNGIGKEITEN ---
 try:
@@ -13,19 +13,20 @@ try:
     from google.oauth2 import service_account
 except ImportError as e:
     st.error(f"🚨 Fehler beim Laden der Bibliotheken: {e}")
-    st.info("Bitte stelle sicher, dass `google-cloud-firestore` in deiner requirements.txt steht.")
+    st.info("Bitte stelle sicher, dass `google-cloud-firestore`, `Pillow` und `requests` in deiner requirements.txt stehen.")
     st.stop()
 
-# --- KONFIGURATION ---
+# --- KONFIGURATION AUS SECRETS ---
 firebase_info = st.secrets.get("FIREBASE_JSON")
 TEAM_PASSWORD = "2180"
-# Hier kannst du die Telefonnummer der Firma oder Gruppe hinterlegen
-WHATSAPP_TARGET = "491234567890" 
+
+# Die ngrok-URL von deinem Firmen-PC
+NGROK_URL = st.secrets.get("LOCAL_SERVER_URL", "HIER_DEINE_NGROK_URL_EINTRAGEN")
 
 @st.cache_resource
 def get_db():
     if not firebase_info:
-        st.error("Google Credentials fehlen!")
+        st.error("Google Credentials (FIREBASE_JSON) fehlen in den Secrets!")
         st.stop()
     try:
         info = json.loads(firebase_info)
@@ -43,74 +44,99 @@ def get_db():
 db = get_db()
 
 # --- HILFSFUNKTIONEN ---
-def process_file(file):
-    """Verarbeitet Bilder für Firestore (Base64) oder erkennt zu große Videos."""
+def process_file(file, fall_nummer):
+    """Verarbeitet Bilder für Firestore oder sendet große Videos an den Firmen-PC via ngrok."""
     file_type = file.type
     
+    # 1. BILDER (Werden komprimiert und in Firestore gespeichert)
     if "image" in file_type:
         try:
             img = Image.open(file)
+            # Bild verkleinern für Firestore (Limit pro Dokument 1MB)
             img.thumbnail((1000, 1000))
             buffer = io.BytesIO()
             img.save(buffer, format="JPEG", quality=70)
             base64_str = base64.b64encode(buffer.getvalue()).decode()
-            return {"data": f"data:image/jpeg;base64,{base64_str}", "status": "stored"}
-        except:
+            return {"data": f"data:image/jpeg;base64,{base64_str}", "status": "stored", "method": "firestore"}
+        except Exception:
             return None
+            
+    # 2. VIDEOS ODER ANDERE DATEIEN
     else:
-        # Videos werden in Firestore oft zu groß (>1MB)
-        file_bytes = file.read()
-        if len(file_bytes) > 950000:
-            # Zu groß für Firestore -> Markierung für externen Versand
-            return {"data": file.name, "status": "external", "size": len(file_bytes)}
+        file_content = file.read()
+        # Wenn Datei > 0.95 MB, sende sie an den lokalen Server (Firmen-PC)
+        if len(file_content) > 950000:
+            if NGROK_URL == "HIER_DEINE_NGROK_URL_EINTRAGEN" or not NGROK_URL:
+                return {"data": file.name, "status": "error", "msg": "Keine Server-URL konfiguriert"}
+            
+            try:
+                clean_url = NGROK_URL.rstrip('/')
+                # Sende Datei per POST an das server.py Skript auf dem PC
+                response = requests.post(
+                    f"{clean_url}/upload",
+                    files={"file": (file.name, file_content, file_type)},
+                    data={"fall_nummer": fall_nummer},
+                    timeout=120 # Langer Timeout für große Video-Uploads
+                )
+                if response.status_code == 200:
+                    return {"data": file.name, "status": "stored", "method": "local_server"}
+                else:
+                    return {"data": file.name, "status": "error", "msg": f"Server-Fehler: {response.status_code}"}
+            except Exception as e:
+                return {"data": file.name, "status": "error", "msg": f"Verbindung fehlgeschlagen: {str(e)}"}
         else:
-            base64_str = base64.b64encode(file_bytes).decode()
-            return {"data": f"data:{file_type};base64,{base64_str}", "status": "stored"}
+            # Kleines Video (< 1MB) direkt in Firestore speichern
+            base64_str = base64.b64encode(file_content).decode()
+            return {"data": f"data:{file_type};base64,{base64_str}", "status": "stored", "method": "firestore"}
 
-def create_whatsapp_link(text):
-    encoded_text = urllib.parse.quote(text)
-    return f"https://wa.me/{WHATSAPP_TARGET}?text={encoded_text}"
+# --- UI LAYOUT ---
+st.set_page_config(page_title="Fall-Archiv & Firmen-Server", layout="wide")
 
-# --- UI ---
-st.set_page_config(page_title="Fall-Archiv & Video-Manager", layout="wide")
-
+# LOGIN CHECK
 if "auth" not in st.session_state:
     st.title("🔒 Team Login")
-    pwd = st.text_input("Passwort", type="password")
+    pwd = st.text_input("Passwort eingeben", type="password")
     if st.button("Anmelden") or (pwd == TEAM_PASSWORD and pwd != ""):
         if pwd == TEAM_PASSWORD:
             st.session_state["auth"] = True
             st.rerun()
         else:
-            st.error("Falsch")
+            st.error("Falsches Passwort")
     st.stop()
 
-mode = st.sidebar.radio("Navigation", ["Übersicht", "Neuanlage"])
+# NAVIGATION
+mode = st.sidebar.radio("Menü", ["Übersicht", "Neuanlage"])
 
+# --- MODUS: NEUANLAGE ---
 if mode == "Neuanlage":
     st.header("➕ Neuen Fall anlegen")
     with st.form("form_neu", clear_on_submit=True):
-        fnr = st.text_input("Fall-Nummer")
+        fnr = st.text_input("Fall-Nummer (z.B. F-2024-001)")
         fdat = st.date_input("Datum", datetime.date.today())
-        fbes = st.text_area("Beschreibung")
-        files = st.file_uploader("Medien (Bilder landen in Cloud, große Videos per WA)", accept_multiple_files=True)
+        fbes = st.text_area("Beschreibung des Vorfalls")
+        files = st.file_uploader("Medien hochladen (Fotos & Videos)", accept_multiple_files=True)
         
-        if st.form_submit_button("Speichern"):
+        if st.form_submit_button("Fall in Cloud speichern"):
             if fnr and fbes:
                 media_list = []
-                external_videos = []
+                upload_errors = []
                 
-                with st.spinner("Verarbeite Medien..."):
+                with st.spinner("Dateien werden verarbeitet und übertragen..."):
                     for f in files:
-                        res = process_file(f)
+                        res = process_file(f, fnr)
                         if res:
                             if res["status"] == "stored":
-                                media_list.append({"name": f.name, "data": res["data"], "type": f.type, "stored": True})
+                                media_list.append({
+                                    "name": f.name, 
+                                    "data": res["data"] if res["method"] == "firestore" else f"Gespeichert auf Firmen-PC ({f.name})", 
+                                    "type": f.type, 
+                                    "method": res["method"]
+                                })
                             else:
-                                media_list.append({"name": f.name, "data": "Extern gespeichert (WhatsApp/Server)", "type": f.type, "stored": False})
-                                external_videos.append(f.name)
+                                upload_errors.append(f"{f.name}: {res.get('msg', 'Fehler')}")
                 
                 try:
+                    # Daten in die Cloud (Firestore) schreiben
                     db.collection("falle").add({
                         "fall_nummer": fnr,
                         "datum": fdat.isoformat(),
@@ -120,40 +146,52 @@ if mode == "Neuanlage":
                         "created_at": firestore.SERVER_TIMESTAMP
                     })
                     
-                    st.success(f"Fall {fnr} in Datenbank angelegt!")
-                    
-                    if external_videos:
-                        st.warning(f"⚠️ {len(external_videos)} Videos sind zu groß für die Cloud.")
-                        wa_text = f"Neuer Fall: {fnr}\nDatum: {fdat}\nVideos: {', '.join(external_videos)}\n\nBitte hier hochladen/senden!"
-                        wa_url = create_whatsapp_link(wa_text)
-                        st.markdown(f'<a href="{wa_url}" target="_blank" style="text-decoration:none;"><div style="background-color:#25D366;color:white;padding:10px;text-align:center;border-radius:5px;">Jetzt Videos per WhatsApp senden</div></a>', unsafe_allow_html=True)
-                        
+                    st.success(f"✅ Fall {fnr} wurde erfolgreich im Archiv gespeichert!")
+                    if upload_errors:
+                        st.error("⚠️ Einige Videos konnten nicht an den Firmen-PC übertragen werden (siehe unten).")
+                        for err in upload_errors: st.write(f"- {err}")
                 except Exception as e:
-                    st.error(f"Fehler: {e}")
+                    st.error(f"Datenbankfehler: {e}")
+            else:
+                st.warning("Bitte gib mindestens eine Fall-Nummer und eine Beschreibung an.")
 
+# --- MODUS: ÜBERSICHT ---
 elif mode == "Übersicht":
-    st.header("📂 Fall-Archiv")
-    search = st.text_input("Suche...")
+    st.header("📂 Archiviertes Fallregister")
+    search = st.text_input("🔍 Suche nach Fall-Nummer...")
     
-    docs = db.collection("falle").order_by("datum", direction=firestore.Query.DESCENDING).stream()
-    
-    for doc in docs:
-        row = doc.to_dict()
-        if search and search.lower() not in row['fall_nummer'].lower():
-            continue
+    try:
+        # Fälle aus der Cloud laden
+        docs = db.collection("falle").order_by("datum", direction=firestore.Query.DESCENDING).stream()
+        
+        found = False
+        for doc in docs:
+            row = doc.to_dict()
+            if search and search.lower() not in row.get('fall_nummer', '').lower():
+                continue
             
-        with st.expander(f"Fall {row['fall_nummer']} - {row['datum']}"):
-            st.write(f"**Beschreibung:** {row['beschreibung']}")
-            
-            if row.get('medien'):
-                st.write("---")
-                cols = st.columns(3)
-                for i, m in enumerate(row['medien']):
-                    with cols[i % 3]:
-                        if m.get("stored", True):
-                            if "image" in m['type']:
-                                st.image(m['data'], caption=m['name'])
+            found = True
+            with st.expander(f"📦 Fall: {row.get('fall_nummer', 'Unbekannt')} | Datum: {row.get('datum', 'Ohne Datum')}"):
+                st.write(f"**Vorgang:** {row.get('beschreibung', '-')}")
+                
+                if row.get('medien'):
+                    st.write("---")
+                    st.write("**Anhänge:**")
+                    cols = st.columns(3)
+                    for i, m in enumerate(row['medien']):
+                        method = m.get("method", "firestore")
+                        with cols[i % 3]:
+                            if method == "firestore":
+                                if "image" in m['type']:
+                                    st.image(m['data'], caption=m['name'], use_container_width=True)
+                                else:
+                                    st.video(m['data'])
                             else:
-                                st.video(m['data'])
-                        else:
-                            st.info(f"🎥 {m['name']}\n(Video wurde extern gesendet)")
+                                # Info-Box für Dateien, die auf der lokalen Festplatte liegen
+                                st.info(f"🖥️ **{m['name']}**\nDiese Datei ist zu groß für die Cloud und wurde direkt auf dem Firmen-PC gesichert.")
+        
+        if not found:
+            st.info("Keine passenden Fälle gefunden.")
+            
+    except Exception as e:
+        st.error(f"Fehler beim Laden der Cloud-Daten: {e}")
