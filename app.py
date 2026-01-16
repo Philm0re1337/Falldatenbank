@@ -47,13 +47,14 @@ def get_services():
             'https://www.googleapis.com/auth/drive.readonly'
         ])
         
-        # Falls deine Datenbank-ID nicht '(default)' ist, sondern 'falldatenbank'
-        # geben wir sie hier explizit an. 
-        # Meistens heißt die Datenbank-Instanz trotzdem '(default)', auch wenn das Projekt 'falldatenbank' heißt.
-        try:
-            db = firestore.Client(credentials=scoped_credentials, database="(default)")
-        except:
-            db = firestore.Client(credentials=scoped_credentials)
+        # Hier nutzen wir explizit deine Datenbank-ID 'falldatenbank'
+        # Google Cloud erlaubt pro Projekt mehrere Datenbanken, 
+        # daher muss der Name genau mit dem übereinstimmen, was du im Google Panel angelegt hast.
+        db = firestore.Client(
+            credentials=scoped_credentials, 
+            project=info.get("project_id"),
+            database="falldatenbank"
+        )
             
         drive_service = build('drive', 'v3', credentials=scoped_credentials)
         
@@ -137,7 +138,7 @@ if mode == "Neuanlage":
                     })
                     st.success(f"Fall {fnr} wurde erfolgreich angelegt!")
                 except Exception as e:
-                    st.error(f"Datenbankfehler: {e}. Prüfe, ob Firestore im Projekt aktiviert ist.")
+                    st.error(f"Datenbankfehler: {e}. Prüfe, ob die Datenbank-ID 'falldatenbank' korrekt ist.")
             else:
                 st.warning("Bitte Fall-Nummer und Beschreibung ausfüllen.")
 
@@ -147,6 +148,7 @@ elif mode == "Übersicht":
     search_query = st.text_input("🔍 Suche nach Fallnummer...", "").strip()
     
     try:
+        # Abfrage der Daten aus der Collection "falle"
         docs = db.collection("falle").order_by("datum", direction=firestore.Query.DESCENDING).stream()
         data = []
         for doc in docs:
